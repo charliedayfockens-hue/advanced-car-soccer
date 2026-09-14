@@ -74,7 +74,7 @@
     carViews.forEach(v => v.dispose());
     carPrev = world.cars.map(snap); carCurr = world.cars.map(snap); carDraw = world.cars.map(snap);
     carViews = world.cars.map((car, i) => {
-      const paint = session.mode === 'freeplay' ? PAINT.freeplay : PAINT[car.team];
+      const paint = session.mode === 'freeplay' && i === 0 ? PAINT.freeplay : PAINT[car.team];
       const v = new Game.View.CarView(scene, car, paint[0], paint[1]);
       v.setTheme(builtTheme || 'realistic');
       v.setShowHitbox(i === 0 && S.get('training').showHitbox);
@@ -141,13 +141,17 @@
     b.angVel = new Game.Math.Vec3();
   }
 
+  // opponentId: the 1v1 opponent, or the free play bot ('none' for no bot)
   async function startSession(mode, opponentId) {
+    const forMode = Game.Bots.OPPONENTS.filter(o => o.modes.includes(mode));
     session.mode = mode;
-    session.opponent = mode === '1v1' ? (Game.Bots.OPPONENTS.find(o => o.id === opponentId) || Game.Bots.OPPONENTS[0]) : null;
+    session.opponent = forMode.find(o => o.id === opponentId) || (mode === '1v1' ? forMode[0] : null);
+    session.botOptions = { mirrorAxis: S.get('menu').mirrorAxis };
     session.overtime = false;
     session.matchOver = false;
     session.clock = mode === '1v1' ? MATCH_SECONDS : 0;
-    world.setTeams(mode === '1v1' ? ['blue', 'orange'] : ['blue']);
+    const botTeam = session.opponent && (session.opponent.team ? session.opponent.team(session.botOptions) : 'orange');
+    world.setTeams(botTeam ? ['blue', botTeam] : ['blue']);
     world.setBoostMode(mode === '1v1' ? 'standard' : S.get('training').boost);
     world.resetKickoff();
     buildCarViews();
@@ -163,11 +167,15 @@
     if (session.opponent) {
       try {
         await session.opponent.load();
-        session.bot = session.opponent.make(world, 1);
+        session.bot = session.opponent.make(world, 1, session.botOptions);
       } catch (e) {
         console.warn(e);
-        Game.UI.toast(session.opponent.name + " couldn't load (see bottom-left), playing Rookie instead");
-        session.bot = Game.Bots.OPPONENTS.find(o => o.id === 'rookie').make(world, 1);
+        if (mode === '1v1') {
+          Game.UI.toast(session.opponent.name + " couldn't load (see bottom-left), playing Rookie instead");
+          session.bot = Game.Bots.OPPONENTS.find(o => o.id === 'rookie').make(world, 1);
+        } else {
+          Game.UI.toast(session.opponent.name + " couldn't load (see bottom-left)");
+        }
       }
     }
     startKickoff();
@@ -426,6 +434,7 @@
           const controls = [Object.assign({}, playerControls)];
           if (session.bot) controls[1] = session.bot.tick();
           world.step(controls);
+          if (session.bot && session.bot.afterStep) session.bot.afterStep();
           capture(carCurr, ballCurr);
           simTime += TICK;
           accumulator -= TICK;

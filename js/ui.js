@@ -571,7 +571,11 @@ Game.UI = (function () {
     const m = S.get('menu');
     document.querySelectorAll('.mm-card').forEach(c => c.classList.toggle('active', c.dataset.mode === m.mode));
     $('mm-opponent-section').classList.toggle('collapsed', m.mode !== '1v1');
-    document.querySelectorAll('.mm-opp').forEach(o => o.classList.toggle('active', o.dataset.id === m.opponent));
+    $('mm-freeplay-section').classList.toggle('collapsed', m.mode !== 'freeplay');
+    document.querySelectorAll('#mm-opponents .mm-opp').forEach(o => o.classList.toggle('active', o.dataset.id === m.opponent));
+    document.querySelectorAll('#mm-freeplay-bots .mm-opp').forEach(o => o.classList.toggle('active', o.dataset.id === m.freeplayBot));
+    $('mm-mirror-axis').classList.toggle('hidden', m.freeplayBot !== 'mirror');
+    document.querySelectorAll('#mm-mirror-axis button').forEach(b => b.classList.toggle('active', b.dataset.axis === m.mirrorAxis));
     const style = S.get('graphics').boostStyle;
     document.querySelectorAll('#mm-boost button').forEach(b => b.classList.toggle('active', b.dataset.boost === style));
   }
@@ -580,18 +584,23 @@ Game.UI = (function () {
     menuOpts = opts;
     if (!menuBound) {
       menuBound = true;
-      const list = $('mm-opponents');
-      opts.opponents.forEach(o => {
+      const addBot = (list, o, settingKey) => {
         const b = el('button', 'mm-opp');
         b.dataset.id = o.id;
         const av = el('div', 'mm-opp-avatar ' + o.id, o.name[0]);
         const text = el('div');
         text.append(el('div', 'mm-opp-name', o.name), el('div', 'mm-opp-desc', o.desc));
         b.append(av, text);
-        b.addEventListener('click', () => { S.set('menu', 'opponent', o.id); renderMenuState(); Game.Audio.uiSelect(); });
+        b.addEventListener('click', () => { S.set('menu', settingKey, o.id); renderMenuState(); Game.Audio.uiSelect(); });
         b.addEventListener('mouseenter', () => Game.Audio.uiHover());
         list.appendChild(b);
-      });
+      };
+      opts.opponents.filter(o => o.modes.includes('1v1')).forEach(o => addBot($('mm-opponents'), o, 'opponent'));
+      addBot($('mm-freeplay-bots'), { id: 'none', name: 'No bot', desc: 'Just you and the ball.' }, 'freeplayBot');
+      opts.opponents.filter(o => o.modes.includes('freeplay')).forEach(o => addBot($('mm-freeplay-bots'), o, 'freeplayBot'));
+      document.querySelectorAll('#mm-mirror-axis button').forEach(b => b.addEventListener('click', () => {
+        S.set('menu', 'mirrorAxis', b.dataset.axis); renderMenuState(); Game.Audio.uiSelect();
+      }));
       document.querySelectorAll('.mm-card').forEach(c => {
         c.addEventListener('click', () => { S.set('menu', 'mode', c.dataset.mode); renderMenuState(); Game.Audio.uiSelect(); });
         c.addEventListener('mouseenter', () => Game.Audio.uiHover());
@@ -603,7 +612,7 @@ Game.UI = (function () {
       $('mm-play').addEventListener('click', () => {
         Game.Audio.unlock();
         const m = S.get('menu');
-        menuOpts.onStart(m.mode, m.opponent);
+        menuOpts.onStart(m.mode, m.mode === '1v1' ? m.opponent : m.freeplayBot);
       });
     }
     renderMenuState();
