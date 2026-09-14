@@ -21,6 +21,7 @@
   const world = new Game.World.World();
   Game.Input.init(canvas);
   Game.View.loadModels();
+  Game.Bots.loadElement().catch(() => {}); // preload so 1v1 starts instantly; failures show on screen
 
   const ballView = new Game.View.BallView(scene, RL.BALL_COLLISION_RADIUS_SOCCAR);
   const effects = new Game.Effects.Effects(scene);
@@ -158,7 +159,7 @@
         session.bot = session.opponent.make(world, 1);
       } catch (e) {
         console.warn(e);
-        Game.UI.toast(session.opponent.name + " couldn't load, playing Rookie instead");
+        Game.UI.toast(session.opponent.name + " couldn't load (see bottom-left), playing Rookie instead");
         session.bot = Game.Bots.OPPONENTS.find(o => o.id === 'rookie').make(world, 1);
       }
     }

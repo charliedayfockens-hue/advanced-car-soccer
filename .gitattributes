@@ -1,0 +1,7 @@
+# Game assets must be stored as normal files. Git LFS would leave small pointer files in the repo,
+# which Cloudflare Pages / GitHub Pages builds don't download. Binaries never get line-ending changes.
+*.fbx  binary -filter
+*.png  binary -filter
+*.jpg  binary -filter
+*.jpeg binary -filter
+*.json -filter

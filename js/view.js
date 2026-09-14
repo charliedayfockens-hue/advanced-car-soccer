@@ -64,9 +64,11 @@ Game.View = (function () {
     const manager = new THREE.LoadingManager();
     manager.setURLModifier(url => (/\.(png|jpe?g|tga)$/i.test(url) ? BLANK_PNG : url));
     const loader = new THREE.FBXLoader(manager);
-    const tl = new THREE.TextureLoader();
-    const tex = (url, srgb) => { const t = tl.load(url); if (srgb) t.encoding = THREE.sRGBEncoding; t.anisotropy = 8; return t; };
-    const loadFbx = url => new Promise(res => loader.load(url, res, undefined, err => { console.warn('Model failed to load:', url, err); res(null); }));
+    const tex = (url, srgb) => { const t = Game.Assets.texture(url); if (srgb) t.encoding = THREE.sRGBEncoding; t.anisotropy = 8; return t; };
+    // Downloads are checked by Game.Assets so a broken deploy is reported instead of silently skipped
+    const loadFbx = url => Game.Assets.fetchChecked(url, { kind: 'FBX', check: Game.Assets.isFbx })
+      .then(buf => loader.parse(buf, url.slice(0, url.lastIndexOf('/') + 1)))
+      .catch(err => { Game.Assets.report(err, url); return null; });
 
     Promise.all([loadFbx('assets/car/Fennec.fbx'), loadFbx('assets/ball/Ball.fbx')]).then(([car, ball]) => {
       try { if (car) models.car = prepareCar(car, tex); } catch (e) { console.warn('Car model setup failed', e); }

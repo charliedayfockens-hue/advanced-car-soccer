@@ -1,0 +1,5 @@
+# Cloudflare Pages headers. Files are versioned with ?v=, so revalidate rather than cache blindly.
+/assets/*
+  Cache-Control: public, max-age=0, must-revalidate
+/js/*
+  Cache-Control: public, max-age=0, must-revalidate

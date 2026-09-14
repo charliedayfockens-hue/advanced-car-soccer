@@ -1,0 +1,29 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "car-soccer",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8420"],
+      "port": 8420
+    },
+    {
+      "name": "hosted-slow",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["C:\\Users\\Charl\\AppData\\Local\\Temp\\claude\\C--Users-Charl-OneDrive-Desktop-Developer-html-games-advanced-car-ball\\bea7ca6d-3100-4885-959e-495ca46780cf\\scratchpad\\pages_server.py", "8431", "slow", "C:\\Users\\Charl\\OneDrive\\Desktop\\Developer\\html games\\advanced car ball"],
+      "port": 8431
+    },
+    {
+      "name": "hosted-missing",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["C:\\Users\\Charl\\AppData\\Local\\Temp\\claude\\C--Users-Charl-OneDrive-Desktop-Developer-html-games-advanced-car-ball\\bea7ca6d-3100-4885-959e-495ca46780cf\\scratchpad\\pages_server.py", "8432", "missing", "C:\\Users\\Charl\\OneDrive\\Desktop\\Developer\\html games\\advanced car ball"],
+      "port": 8432
+    },
+    {
+      "name": "hosted-lfs",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["C:\\Users\\Charl\\AppData\\Local\\Temp\\claude\\C--Users-Charl-OneDrive-Desktop-Developer-html-games-advanced-car-ball\\bea7ca6d-3100-4885-959e-495ca46780cf\\scratchpad\\pages_server.py", "8433", "lfs", "C:\\Users\\Charl\\OneDrive\\Desktop\\Developer\\html games\\advanced car ball"],
+      "port": 8433
+    }
+  ]
+}

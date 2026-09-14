@@ -24,12 +24,28 @@ Game.Bots = (function () {
   function loadElement() {
     if (weights) return Promise.resolve(weights);
     if (!weightsPromise) {
-      weightsPromise = fetch('assets/bots/element.json')
-        .then(r => { if (!r.ok) throw new Error('element.json ' + r.status); return r.json(); })
+      const url = 'assets/bots/element.json';
+      weightsPromise = Game.Assets.json(url)
         .then(json => {
-          weights = {};
-          Object.keys(json).forEach(k => { weights[k] = decode(json[k]); });
+          const w = {};
+          try {
+            Object.keys(json).forEach(k => { w[k] = decode(json[k]); });
+          } catch (e) {
+            throw new Game.Assets.AssetError(url, 'has corrupt network weights - it was damaged on upload');
+          }
+          ['fc1', 'fc2', 'fc3', 'fc4', 'fc5', 'cat_heads', 'ber_heads'].forEach(n => {
+            const W = w[n + '.weight'], b = w[n + '.bias'];
+            if (!W || !b || W.data.length !== W.shape[0] * W.shape[1] || b.data.length !== W.shape[0]) {
+              throw new Game.Assets.AssetError(url, 'is missing network layer ' + n + ' - it is incomplete or outdated');
+            }
+          });
+          weights = w;
           return weights;
+        })
+        .catch(err => {
+          weightsPromise = null; // allow another try on the next match
+          Game.Assets.report(err, url);
+          throw err;
         });
     }
     return weightsPromise;
