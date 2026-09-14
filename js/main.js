@@ -560,8 +560,8 @@
       chase.updateReplay(dt, carDraw[0].pos, ballDraw.pos, goalPos, replay.goalTime - replay.t, shake);
     } else {
       chase.update(dt, carDraw[0].pos, carDraw[0].quat, me.speed, ballDraw.pos, paused ? null : I, shake,
-        { onGround: world.car.state.isOnGround, supersonic: me.supersonic,
-          velocity: toThreePos(world.car.body.linVel), groundNormal: wheelGroundNormal(world.car) });
+        { onGround: world.car.state.isOnGround, groundNormal: wheelGroundNormal(world.car),
+          flipping: !world.car.state.isOnGround && world.car.state.hasFlipped && world.car.state.flipTime < 0.9 });
     }
     effects.setViewportHeight(window.innerHeight, chase.camera.fov);
     ema('camera', performance.now() - t0);

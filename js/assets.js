@@ -9,7 +9,7 @@
 window.Game = window.Game || {};
 
 Game.Assets = (function () {
-  const VERSION = '55'; // keep in step with index.html so hosts and CDNs don't serve stale copies
+  const VERSION = '56'; // keep in step with index.html so hosts and CDNs don't serve stale copies
   const reported = new Map();
 
   class AssetError extends Error {
