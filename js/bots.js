@@ -4,6 +4,9 @@
 //    repeat with the same update timing as bot.py, and the scripted speedflip kickoff
 //    (sequences/speedflip.py). Weights converted from model.p into assets/bots/element.json.
 //  - Rookie: a simple hand-written ball chaser for a gentler opponent.
+//  - Bowie Knife 99: an original bump/demo meme bot written for this game.
+//  - Mirror Bot (free play only): written for this game after Darxeal's Mirror Bot idea; copies the player's
+//    car in mirror image across the halfway line or the long axis of the field.
 // Bots see the world through the same RocketSim state the player uses.
 window.Game = window.Game || {};
 
@@ -325,10 +328,98 @@ Game.Bots = (function () {
     }
   }
 
+  // ---------------- Bowie Knife 99 ----------------
+  // Original meme bot for this game: it ignores the ball and hunts the other car, leading its target,
+  // boosting to supersonic for demolitions and hopping to catch cars in the air.
+  class BowieKnifeBot {
+    constructor(world, carIndex) {
+      this.world = world;
+      this.index = carIndex;
+      this.name = 'Bowie Knife 99';
+      this.controls = { throttle: 0, steer: 0, pitch: 0, yaw: 0, roll: 0, jump: false, boost: false, handbrake: false };
+      this.jumpTimer = 0;
+    }
+    get ready() { return true; }
+    reset() { this.jumpTimer = 0; }
+    tick() {
+      const w = this.world, me = w.cars[this.index], c = this.controls;
+      const target = w.cars.find((car, i) => i !== this.index && !car.isDemoed);
+      c.jump = false;
+      if (!target || me.isDemoed) {
+        c.throttle = 0; c.steer = 0; c.yaw = 0; c.boost = false; c.handbrake = false;
+        return c;
+      }
+      const b = me.body, pos = b.pos.mul(BT), targetPos = target.body.pos.mul(BT), targetVel = target.body.linVel.mul(BT);
+      // Lead the target a little from far away (a long lead overshoots cars that turn); up close, ram it head on
+      const gap = Math.hypot(targetPos.x - pos.x, targetPos.y - pos.y);
+      const lead = gap < 700 ? 0 : Math.min(gap / Math.max(b.linVel.length() * BT, 1400), 0.45);
+      const dx = targetPos.x + targetVel.x * lead - pos.x, dy = targetPos.y + targetVel.y * lead - pos.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const f = b.rot.col(0), r = b.rot.col(1);
+      const facing = (dx * f.x + dy * f.y) / (dist * (Math.hypot(f.x, f.y) || 1));
+      const side = (dx * r.x + dy * r.y) / dist;
+      const onGround = me.state.isOnGround;
+      c.throttle = 1;
+      c.steer = Math.max(-1, Math.min(1, side * 4));
+      c.yaw = c.steer; c.pitch = 0; c.roll = 0;
+      c.handbrake = onGround && facing < -0.1 && dist > 500;
+      // Boost whenever it's roughly lined up, so it reaches supersonic for demolitions
+      c.boost = onGround ? facing > 0.55 : facing > 0.9;
+      this.jumpTimer = Math.max(0, this.jumpTimer - 1);
+      if (onGround && this.jumpTimer === 0 && gap < 500 && targetPos.z - pos.z > 120) { c.jump = true; this.jumpTimer = 60; }
+      return c;
+    }
+  }
+
+  // ---------------- Mirror Bot ----------------
+  // Free play only, written for this game after Darxeal's Mirror Bot idea. After every physics tick its car is
+  // set to the player's car reflected across the halfway line ('midfield') or the long axis ('sides'), so it
+  // copies every move in mirror image. It presses the player's controls with steering flipped so boost matches.
+  class MirrorBot {
+    constructor(world, carIndex, options) {
+      this.world = world;
+      this.index = carIndex;
+      this.name = 'Mirror Bot';
+      this.axis = options && options.mirrorAxis === 'sides' ? 'sides' : 'midfield';
+      this.controls = { throttle: 0, steer: 0, pitch: 0, yaw: 0, roll: 0, jump: false, boost: false, handbrake: false };
+    }
+    get ready() { return true; }
+    reset() {}
+    tick() {
+      const src = this.world.cars[0].controls, c = this.controls;
+      Object.assign(c, src);
+      c.steer = -src.steer; c.yaw = -src.yaw; c.roll = -src.roll;
+      return c;
+    }
+    afterStep() {
+      const { Vec3, Mat3 } = Game.Math;
+      const src = this.world.cars[0], dst = this.world.cars[this.index];
+      if (!src || !dst) return;
+      const k = this.axis === 'sides' ? [-1, 1, 1] : [1, -1, 1];
+      const reflect = v => new Vec3(v.x * k[0], v.y * k[1], v.z * k[2]);
+      const s = src.body, d = dst.body;
+      d.pos = reflect(s.pos);
+      d.linVel = reflect(s.linVel);
+      d.angVel = reflect(s.angVel).neg(); // angular velocity is a pseudovector, so a reflection also flips it
+      const fwd = reflect(s.rot.col(0)), up = reflect(s.rot.col(2));
+      d.rot = Mat3.fromColumns(fwd, up.cross(fwd), up);
+      d.updateInertiaTensor();
+      d.velocityImpulseCache = new Vec3();
+      for (const key of ['isOnGround', 'isBoosting', 'isSupersonic', 'boost', 'hasJumped', 'hasDoubleJumped', 'hasFlipped', 'isJumping', 'isFlipping']) {
+        dst.state[key] = src.state[key];
+      }
+      // Left and right wheels swap sides in the reflection
+      dst.wheels.forEach((w, i) => { const sw = src.wheels[i ^ 1]; w.suspensionLength = sw.suspensionLength; w.steerAngle = -sw.steerAngle; });
+    }
+  }
+
   const OPPONENTS = [
-    { id: 'element', name: 'Element', desc: 'Neural network trained with RLGym (RLBotPack, by Rangler). Plays 1v1 like a strong player.', make: (w, i) => new ElementBot(w, i), load: loadElement },
-    { id: 'rookie', name: 'Rookie', desc: 'Simple ball chaser. Good for warming up.', make: (w, i) => new RookieBot(w, i), load: () => Promise.resolve() }
+    { id: 'element', name: 'Element', desc: 'Diamond-level challenger. A neural network by Rangler, trained with RLGym reinforcement learning (RLBotPack). Speed-flips kickoffs, shoots hard, challenges quickly and rotates back when beaten. A real test of your fundamentals.', modes: ['1v1'], make: (w, i) => new ElementBot(w, i), load: loadElement },
+    { id: 'bowie', name: 'Bowie Knife 99', desc: 'Bump and demo meme bot. It barely cares about the ball: it hunts you down, boosts to supersonic and tries to demolish you every chance it gets.', modes: ['1v1'], make: (w, i) => new BowieKnifeBot(w, i), load: () => Promise.resolve() },
+    { id: 'rookie', name: 'Rookie', desc: 'Simple ball chaser. Good for warming up.', modes: ['1v1'], make: (w, i) => new RookieBot(w, i), load: () => Promise.resolve() },
+    { id: 'mirror', name: 'Mirror Bot', desc: 'Free play only. Copies every move you make in mirror image, from the other half of the field or the other side of it.', modes: ['freeplay'],
+      team: opts => (opts && opts.mirrorAxis === 'sides' ? 'blue' : 'orange'), make: (w, i, opts) => new MirrorBot(w, i, opts), load: () => Promise.resolve() }
   ];
 
-  return { OPPONENTS, loadElement, ElementBot, RookieBot };
+  return { OPPONENTS, loadElement, ElementBot, RookieBot, BowieKnifeBot, MirrorBot };
 })();
