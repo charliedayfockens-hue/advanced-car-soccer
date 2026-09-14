@@ -112,6 +112,13 @@
 
   function quatFromArr(q, out) { return toThreeQuat(Game.Math.Mat3.fromQuat(q), out); }
 
+  // Average contact normal of the wheels touching something (three.js axes), or null when none do
+  function wheelGroundNormal(car) {
+    const n = new THREE.Vector3();
+    car.wheels.forEach(w => { if (w.inContact) n.add(new THREE.Vector3(w.contactNormalWS.x, w.contactNormalWS.z, w.contactNormalWS.y)); });
+    return n.lengthSq() > 0 ? n.normalize() : null;
+  }
+
   // ---------- game flow ----------
   let state = 'menu';
   let simTime = 0, playTime = 0, menuTime = 0;
@@ -554,7 +561,7 @@
     } else {
       chase.update(dt, carDraw[0].pos, carDraw[0].quat, me.speed, ballDraw.pos, paused ? null : I, shake,
         { onGround: world.car.state.isOnGround, supersonic: me.supersonic,
-          flipping: !world.car.state.isOnGround && world.car.state.hasFlipped && world.car.state.flipTime < 0.9 });
+          velocity: toThreePos(world.car.body.linVel), groundNormal: wheelGroundNormal(world.car) });
     }
     effects.setViewportHeight(window.innerHeight, chase.camera.fov);
     ema('camera', performance.now() - t0);
