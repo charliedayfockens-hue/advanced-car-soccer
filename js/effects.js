@@ -194,8 +194,8 @@ Game.Effects = (function () {
     { id: 'classic', name: 'Classic', rarity: 'Default', desc: 'A blinding flash, a team-coloured blast and a shockwave across the pitch.' },
     { id: 'partyTime', name: 'Party Time', rarity: 'Black Market', desc: 'Party poppers and confetti, then balloons that float to the roof and pop.' },
     { id: 'fireworks', name: 'Fireworks', rarity: 'Import', desc: 'Rockets launch from the goal and chain into firework bursts.' },
-    { id: 'hellfire', name: 'Hellfire', rarity: 'Black Market', desc: 'A column of flame erupts from the goal and rains embers.' },
-    { id: 'dragons', name: 'Dueling Dragons', rarity: 'Black Market', desc: 'Two fire dragons spiral out of the goal around each other.' },
+    { id: 'hellfire', name: 'Hellfire', rarity: 'Black Market', desc: 'A horned demon skull of molten lava rises from a cracked crater, roars fire and hurls meteors.' },
+    { id: 'dragons', name: 'Dueling Dragons', rarity: 'Black Market', desc: 'Two winged dragons burst from a portal, spiral up breathing fire and clash in the sky.' },
     { id: 'voxel', name: 'Voxel', rarity: 'Black Market', desc: 'Blocky pixel fire bursts out, half of it in your team colour.' }
   ];
 

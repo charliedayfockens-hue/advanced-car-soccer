@@ -210,6 +210,7 @@
         }
       }
     }
+    if (Game.ExplosionModels) Game.ExplosionModels.prewarm(renderer, chase.camera, S.get('garage').explosion);
     startKickoff();
     Game.Input.requestPointerLock();
   }
