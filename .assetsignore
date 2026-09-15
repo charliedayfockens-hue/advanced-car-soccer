@@ -1,0 +1,8 @@
+# Files Cloudflare Workers must not upload as part of the site.
+# The repo root is the site, so without this the .git history (one pack file over 25 MiB) is uploaded and
+# the deploy fails with "Asset too large".
+.git
+.github
+.gitattributes
+.assetsignore
+.claude
