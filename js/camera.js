@@ -1,36 +1,69 @@
 // Chase camera matching car-soccer.com's camera. Its code isn't licensed for reuse, so nothing is copied:
-// this reproduces its behaviour from measurements of the live game (FOV 110, distance 270, height 100,
-// angle -3, stiffness 0.35, swivel 4, transition 1).
-// Measured:
-//  - at rest the camera sits 269.6 behind and 114.5 above the car, pitched exactly by Angle: it is at
-//    pivot + up * height, pulled back by Distance along the pitched view direction
-//  - the pivot trails the car by about 0.032 s of velocity (tau = (1 - stiffness) * 0.05)
-//  - the FOV setting is horizontal on landscape screens; portrait screens keep the vertical FOV it has at
-//    16:9. FOV widens with speed, up to +5 deg at max speed
-//  - ball cam yaw follows the direction to the ball with an exponential lag of about 0.1 s
-// Not yet measured (kept from earlier tuning):
-//  - car cam follows the car's heading and rides walls/ceilings with it; the heading is held during a
-//    dodge so flips never spin the view
-//  - ball cam aims from the camera at the ball (plus the Angle offset): above the ball the camera rises
-//    and looks down at it, and it only swings low under the car when the ball is well above you
-//  - Transition Speed sets how quickly the view blends between car cam and ball cam
-// Swivel (mouse, right stick or Look actions), camera shake and a replay director are included.
-// three.js coordinates (Y up), uu.
+// this reproduces its behaviour from recordings of the live game (FOV 110, distance 270, height 100,
+// angle -3, stiffness 0.35, swivel 4, transition 1), measured 2026-09-13 and 2026-09-14:
+//  - the camera looks at a point Height above a pivot that trails the car by (1 - stiffness) * 0.05 s, from
+//    Distance away, and is always oriented with world up: it never rolls, on walls or in the air
+//  - car cam on the ground: the heading follows the car's nose with the same lag as the pivot, and the offset
+//    and pitch use the surface under the wheels, so it rides walls without rolling
+//  - car cam in the air: the heading slowly drifts toward the direction of travel (only at speed), so flips
+//    and air rolls don't turn the view
+//  - car cam pitch hangs off the look point like a camera on a rope: rising or falling drags it, and it eases
+//    back to Angle (fast on the ground, slowly in the air)
+//  - ball cam: yaw follows the ball with a 0.1 s lag; pitch stays at Angle until the ball is 9 deg below or
+//    11 deg above the screen centre, then follows it, and the camera orbits the look point to match
+//  - FOV: horizontal on landscape screens (portrait keeps the 16:9 vertical FOV); +5 deg with speed and a
+//    further +5 deg at supersonic
+//  - switching between car cam and ball cam blends at 9/s (times Transition Speed)
+// Not measured (kept from earlier tuning): surface-normal smoothing, swivel, the floor clamp and the replay
+// director. three.js coordinates (Y up), uu.
 window.Game = window.Game || {};
 
 Game.ChaseCamera = (function () {
   const WORLD_UP = new THREE.Vector3(0, 1, 0);
-  const tmp = new THREE.Vector3();
-  const clamp = THREE.MathUtils.clamp;
   const DEG = Math.PI / 180;
+  const clamp = THREE.MathUtils.clamp;
   const CAR_MAX_SPEED = 2300;
-  const SPEED_FOV = 5;      // measured: horizontal FOV + 5 deg at max speed, proportional to speed
-  const BALL_YAW_RATE = 10; // measured: ball cam yaw lag of about 0.1 s
 
-  function flatten(v, n) { return v.clone().sub(n.clone().multiplyScalar(v.dot(n))); }
-  function ease(rate, dt) { return 1 - Math.exp(-rate * dt); }
-  function pitched(flat, up, pitch) { return flat.clone().multiplyScalar(Math.cos(pitch)).add(up.clone().multiplyScalar(Math.sin(pitch))); }
-  function elevation(v, up) { return Math.atan2(v.dot(up), Math.max(flatten(v, up).length(), 1)); }
+  const M = {
+    trailPerFlex: 0.05,            // measured: pivot lag tau = (1 - stiffness) * 0.05 s, also the ground heading lag
+    speedFov: 5,                   // measured: +5 deg horizontal at max speed
+    speedFovRate: 10,              // measured (1/s)
+    supersonicFov: 5,              // measured: +5 deg more while supersonic
+    supersonicFovDegPerSec: 40,    // measured: the supersonic step takes ~0.13 s
+    ropeRateGround: 20,            // measured: pitch eases back to Angle (1/s)
+    ropeRateAir: 6,                // measured
+    airHeadingRate: 2.5,           // measured: heading drift toward travel at max speed (1/s), scaled by speed
+    ballYawRate: 10,               // measured: 0.1 s
+    ballBandBelow: 9,              // measured (deg)
+    ballBandAbove: 11,             // measured (deg)
+    ballPitchRate: 20,             // measured (1/s)
+    transitionRate: 9,             // measured at Transition Speed 1 (1/s)
+    normalRateGround: 7,           // not measured
+    normalRateAir: 2.5,            // not measured
+    minHeight: 30                  // not measured
+  };
+
+  const ease = (rate, dt) => 1 - Math.exp(-rate * dt);
+  const flatten = (v, n) => v.clone().addScaledVector(n, -v.dot(n));
+  const pitched = (h, up, pitch) => h.clone().multiplyScalar(Math.cos(pitch)).addScaledVector(up, Math.sin(pitch));
+  const elevation = (v, up) => Math.atan2(v.dot(up), Math.max(flatten(v, up).length(), 1e-6));
+
+  // A unit vector perpendicular to n, as close as possible to pref
+  function perpendicular(n, pref) {
+    for (const v of [pref, new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0)]) {
+      if (!v) continue;
+      const h = flatten(v, n);
+      if (h.lengthSq() > 1e-4) return h.normalize();
+    }
+    return new THREE.Vector3(0, 0, 1);
+  }
+
+  // Rotates unit h (perpendicular to up) toward unit d by fraction t of the signed angle between them.
+  // Deterministic for opposite vectors, unlike a quaternion between unit vectors.
+  function turnToward(h, d, up, t) {
+    const ang = Math.atan2(new THREE.Vector3().crossVectors(h, d).dot(up), h.dot(d));
+    return h.applyAxisAngle(up, ang * t).normalize();
+  }
 
   function angleLerp(a, b, t) {
     let d = b - a;
@@ -39,31 +72,17 @@ Game.ChaseCamera = (function () {
     return a + d * t;
   }
 
-  // Rotates unit vector h (perpendicular to up) toward unit vector d by fraction t of the signed angle
-  // between them. Deterministic for opposite vectors, unlike a quaternion between unit vectors.
-  function turnToward(h, d, up, t) {
-    const ang = Math.atan2(tmp.crossVectors(h, d).dot(up), h.dot(d));
-    return h.applyAxisAngle(up, ang * t).normalize();
-  }
-
   class ChaseCamera {
     constructor(aspect) {
       this.camera = new THREE.PerspectiveCamera(70, aspect, 10, 150000);
       this.ballCam = false;
-      this.pivot = null;
-      this.up = WORLD_UP.clone();
-      this.carHeading = null;
-      this.ballHeading = null;
-      this.blend = null;
-      this.orbit = null;
-      this.aimWeight = 1;
-      this.pitch = THREE.MathUtils.degToRad(-3);
+      this.hfov = null;
       this.swivelYaw = 0;
       this.swivelPitch = 0;
       this.mouseIdle = 0;
-      this.hfov = null;
       this.replayPos = null;
       this.replayLook = null;
+      this.reset();
     }
 
     get settings() { return Game.Settings.get('camera'); }
@@ -91,77 +110,133 @@ Game.ChaseCamera = (function () {
     }
 
     toggleBallCam() { this.ballCam = !this.ballCam; return this.ballCam; }
+
     reset() {
-      this.pivot = null;
-      this.carHeading = null;
-      this.ballHeading = null;
-      this.blend = null;
-      this.orbit = null;
-      this.up.copy(WORLD_UP);
+      this.init = false;
       this.replayPos = null;
     }
 
+    snap(carPos, carFwd, ballPos, onGround, groundNormal) {
+      const angle = this.settings.angle * DEG;
+      this.pivot = carPos.clone();
+      this.lastCarPos = carPos.clone();
+      this.normal = (onGround && groundNormal ? groundNormal : WORLD_UP).clone().normalize();
+      this.carHeading = perpendicular(this.normal, carFwd);
+      this.carPitch = angle;
+      this.carCamPos = null;
+      this.ballHeading = perpendicular(WORLD_UP, ballPos.clone().sub(carPos).lengthSq() > 1 ? ballPos.clone().sub(carPos) : carFwd);
+      this.ballPitch = angle;
+      this.ballCamPos = null;
+      this.blend = this.ballCam ? 1 : 0;
+      this.speedFov = 0;
+      this.sonicFov = 0;
+      this.init = true;
+    }
+
+    // opts: { onGround, groundNormal (wheel contact normal, three.js axes), velocity (uu/s), supersonic }
     update(dt, carPos, carQuat, carSpeed, ballPos, input, shake, opts) {
       opts = opts || {};
       const s = this.settings;
       this.replayPos = null;
+      const angle = s.angle * DEG;
+      const onGround = !!opts.onGround;
+      const vel = opts.velocity || new THREE.Vector3();
+      const carFwd = new THREE.Vector3(1, 0, 0).applyQuaternion(carQuat);
+      if (!this.init || this.pivot.distanceToSquared(carPos) > 1500 * 1500) this.snap(carPos, carFwd, ballPos, onGround, opts.groundNormal);
 
-      const fov = s.fov + SPEED_FOV * clamp(carSpeed / CAR_MAX_SPEED, 0, 1);
+      // FOV: speed part eases, the supersonic step ramps
+      this.speedFov += (M.speedFov * clamp(carSpeed / CAR_MAX_SPEED, 0, 1) - this.speedFov) * ease(M.speedFovRate, dt);
+      const sonicStep = M.supersonicFovDegPerSec * dt;
+      this.sonicFov += clamp((opts.supersonic ? M.supersonicFov : 0) - this.sonicFov, -sonicStep, sonicStep);
+      const fov = s.fov + this.speedFov + this.sonicFov;
       if (this.hfov === null || Math.abs(this.hfov - fov) > 0.01) this.setHorizontalFov(fov);
 
-      // Pivot trails the car as a first-order lag with time constant tau, integrated exactly over the
-      // car's movement this frame, so the trail settles at velocity * tau at any frame rate
-      const tau = (1 - s.stiffness) * 0.05;
-      if (!this.pivot || tau < 1e-4 || !this.lastCarPos || this.pivot.distanceToSquared(carPos) > 1500 * 1500 || dt <= 0) {
-        this.pivot = carPos.clone();
-      } else {
+      // Pivot trails the car as a first-order lag with time constant tau, integrated exactly over the car's
+      // movement this frame, so the trail settles at velocity * tau at any frame rate
+      const tau = (1 - clamp(s.stiffness, 0, 1)) * M.trailPerFlex;
+      if (tau < 1e-4) {
+        this.pivot.copy(carPos);
+      } else if (dt > 0) {
         const k = Math.exp(-dt / tau);
         const lag = this.lastCarPos.clone().sub(this.pivot).multiplyScalar(k)
           .add(carPos.clone().sub(this.lastCarPos).multiplyScalar((tau / dt) * (1 - k)));
         this.pivot = carPos.clone().sub(lag);
       }
-      this.lastCarPos = carPos.clone();
+      this.lastCarPos.copy(carPos);
 
-      // Car cam <-> ball cam blend (0 = car cam, 1 = ball cam)
+      // Surface normal: the wheels' contact normal on the ground, world up in the air
+      this.normal.lerp(onGround && opts.groundNormal ? opts.groundNormal : WORLD_UP, ease(onGround ? M.normalRateGround : M.normalRateAir, dt)).normalize();
+      const n = this.normal;
+
+      // ---- car cam
+      this.carHeading = perpendicular(n, this.carHeading);
+      if (onGround) {
+        const nose = flatten(carFwd, n);
+        if (nose.lengthSq() > 1e-4) turnToward(this.carHeading, nose.normalize(), n, tau < 1e-4 ? 1 : ease(1 / tau, dt));
+      } else {
+        const travel = flatten(vel, n), sp = travel.length();
+        if (sp > 1) turnToward(this.carHeading, travel.divideScalar(sp), n, ease(M.airHeadingRate * Math.min(1, sp / CAR_MAX_SPEED), dt));
+      }
+      const carOrigin = this.pivot.clone().addScaledVector(n, s.height);
+      if (this.carCamPos) {
+        // Only rising or falling drags the rope; moving along the surface keeps the camera at Angle
+        const rise = carOrigin.clone().sub(this.carOrigin).dot(n);
+        const rope = elevation(this.carOrigin.clone().sub(this.carCamPos).addScaledVector(n, rise), n);
+        this.carPitch = rope + (angle - rope) * ease(onGround ? M.ropeRateGround : M.ropeRateAir, dt);
+      } else {
+        this.carPitch = angle;
+      }
+      this.carPitch = clamp(this.carPitch, -1.45, 1.45);
+      const carDir = pitched(this.carHeading, n, this.carPitch);
+      this.carCamPos = carOrigin.clone().addScaledVector(carDir, -s.distance);
+      this.carOrigin = carOrigin;
+
+      // ---- ball cam
+      const ballOrigin = this.pivot.clone().addScaledVector(WORLD_UP, s.height);
+      this.ballHeading = perpendicular(WORLD_UP, this.ballHeading);
+      const toBall = flatten(ballPos.clone().sub(ballOrigin), WORLD_UP), toBallLen = toBall.length();
+      if (toBallLen > 1) turnToward(this.ballHeading, toBall.divideScalar(toBallLen), WORLD_UP, ease(M.ballYawRate, dt));
+      const seenFrom = this.ballCamPos || ballOrigin.clone().addScaledVector(pitched(this.ballHeading, WORLD_UP, angle), -s.distance);
+      const ballElev = elevation(ballPos.clone().sub(seenFrom), WORLD_UP);
+      const ballTarget = clamp(Math.min(Math.max(angle, ballElev - M.ballBandAbove * DEG), ballElev + M.ballBandBelow * DEG), -1.4, 1.4);
+      this.ballPitch += (ballTarget - this.ballPitch) * ease(M.ballPitchRate, dt);
+      const ballDir = pitched(this.ballHeading, WORLD_UP, this.ballPitch);
+      this.ballCamPos = ballOrigin.clone().addScaledVector(ballDir, -s.distance);
+
+      // ---- car cam <-> ball cam blend (0 = car cam, 1 = ball cam)
       const blendTarget = this.ballCam ? 1 : 0;
-      if (this.blend === null) this.blend = blendTarget;
-      this.blend += (blendTarget - this.blend) * ease(6 * Math.max(0.1, s.transitionSpeed), dt);
+      this.blend += (blendTarget - this.blend) * ease(M.transitionRate * Math.max(0.1, s.transitionSpeed), dt);
       if (Math.abs(blendTarget - this.blend) < 1e-3) this.blend = blendTarget;
+      let origin, dir;
+      if (this.blend === 0) {
+        origin = carOrigin; dir = carDir;
+      } else if (this.blend === 1) {
+        origin = ballOrigin; dir = ballDir;
+      } else {
+        origin = carOrigin.clone().lerp(ballOrigin, this.blend);
+        const heading = perpendicular(WORLD_UP, carDir);
+        turnToward(heading, perpendicular(WORLD_UP, ballDir), WORLD_UP, this.blend);
+        dir = pitched(heading, WORLD_UP, THREE.MathUtils.lerp(elevation(carDir, WORLD_UP), elevation(ballDir, WORLD_UP), this.blend));
+      }
 
-      // Up vector: car cam rides the surface under the wheels (not the chassis, which tilts on its
-      // suspension; measured: the pitch stays exactly at Angle at rest), otherwise world up
-      const carUp = WORLD_UP.clone().applyQuaternion(carQuat);
-      const carFwd = new THREE.Vector3(1, 0, 0).applyQuaternion(carQuat);
-      const ride = !this.ballCam && opts.onGround;
-      this.up.lerp(ride ? (opts.groundNormal || carUp) : WORLD_UP, ease(ride ? 7 : 2.5, dt)).normalize();
-      const up = this.up;
+      // ---- swivel
+      this.updateSwivel(dt, input, s);
+      if (this.swivelYaw || this.swivelPitch) {
+        const heading = perpendicular(WORLD_UP, dir).applyAxisAngle(WORLD_UP, -this.swivelYaw);
+        dir = pitched(heading, WORLD_UP, clamp(elevation(dir, WORLD_UP) + this.swivelPitch, -1.45, 1.45));
+      }
 
-      const seed = () => {
-        for (const v of [carFwd, new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0)]) {
-          const h = flatten(v, up);
-          if (h.lengthSq() > 1e-4) return h.normalize();
-        }
-        return new THREE.Vector3(0, 0, 1);
-      };
+      // ---- output: look through the look point, oriented with world up
+      const pos = origin.clone().addScaledVector(dir, -s.distance);
+      pos.y = Math.max(pos.y, M.minHeight);
+      if (shake) pos.add(shake);
+      this.camera.position.copy(pos);
+      this.camera.up.copy(WORLD_UP);
+      this.camera.lookAt(pos.clone().add(dir));
+    }
 
-      // Car heading: the car's nose, held while dodging or pointing straight along up
-      if (this.carHeading) this.carHeading = flatten(this.carHeading, up);
-      if (!this.carHeading || this.carHeading.lengthSq() < 1e-6) this.carHeading = seed();
-      this.carHeading.normalize();
-      const carDesired = flatten(carFwd, up);
-      if (carDesired.lengthSq() > 0.09 && !opts.flipping) turnToward(this.carHeading, carDesired.normalize(), up, ease(14, dt));
-
-      // Ball heading: follows the ball with the measured lag, eased further when the ball is nearly overhead
-      const toBallFlat = flatten(ballPos.clone().sub(this.pivot), up);
-      const flatDist = toBallFlat.length();
-      if (this.ballHeading) this.ballHeading = flatten(this.ballHeading, up);
-      if (!this.ballHeading || this.ballHeading.lengthSq() < 1e-6) this.ballHeading = flatDist > 1 ? toBallFlat.clone() : this.carHeading.clone();
-      this.ballHeading.normalize();
-      if (flatDist > 1) turnToward(this.ballHeading, toBallFlat.divideScalar(flatDist), up, ease(BALL_YAW_RATE * Math.min(1, flatDist / 250), dt));
-
-      const heading = turnToward(this.carHeading.clone(), this.ballHeading, up, this.blend);
-
-      // Swivel
+    // Stick: turns toward the stick direction; mouse: drives the view directly; released: returns to centre
+    updateSwivel(dt, input, s) {
       let lookX = 0, lookY = 0;
       if (input) { const l = input.look(); lookX = l.x; lookY = l.y; }
       const usingStick = Math.abs(lookX) > 0.05 || Math.abs(lookY) > 0.05;
@@ -173,7 +248,7 @@ Game.ChaseCamera = (function () {
         this.mouseIdle = 0;
       } else if (input && input.pointerLocked && (input.mouseDX || input.mouseDY)) {
         this.swivelYaw += input.mouseDX * 0.0006 * s.swivelSpeed;
-        this.swivelPitch = Math.max(-0.6, Math.min(0.6, this.swivelPitch - input.mouseDY * 0.0004 * s.swivelSpeed * invert));
+        this.swivelPitch = clamp(this.swivelPitch - input.mouseDY * 0.0004 * s.swivelSpeed * invert, -0.6, 0.6);
         this.mouseIdle = 0;
       } else {
         this.mouseIdle += dt;
@@ -182,36 +257,6 @@ Game.ChaseCamera = (function () {
           this.swivelPitch += -this.swivelPitch * follow;
         }
       }
-      const flat = heading.clone().applyAxisAngle(up, -this.swivelYaw).normalize();
-
-      // How much ball aiming applies: full in ball cam, faded out while looking around with the stick
-      this.aimWeight += ((usingStick ? 0 : 1) - this.aimWeight) * ease(10, dt);
-      const w = this.blend * this.aimWeight;
-      const angle = THREE.MathUtils.degToRad(s.angle);
-
-      // Position. Ball cam orbits the camera spot around the pivot by the ball's elevation: fully when
-      // the ball is below (camera rises to look down on it), softened when it's above so the camera
-      // keeps car-cam height until the ball is well above you.
-      const origin = this.pivot.clone().add(up.clone().multiplyScalar(s.height));
-      const aim = clamp(elevation(ballPos.clone().sub(origin), up), -1.25, 1.2);
-      const K = 0.3;
-      const orbitTarget = w * (aim > 0 ? aim - K * (1 - Math.exp(-aim / K)) : aim);
-      if (this.orbit === null) this.orbit = orbitTarget;
-      this.orbit += (orbitTarget - this.orbit) * ease(18, dt);
-      const pos = origin.clone().sub(pitched(flat, up, angle + this.orbit).multiplyScalar(s.distance));
-      pos.y = Math.max(pos.y, 30);
-
-      // Look pitch: car cam uses the Angle setting; ball cam aims from the camera at the ball
-      const lookAim = clamp(elevation(ballPos.clone().sub(pos), up), -1.4, 1.4);
-      const targetPitch = clamp(angle + w * lookAim + this.swivelPitch, -1.5, 1.5);
-      this.pitch += (targetPitch - this.pitch) * ease(18, dt);
-      const fwd = pitched(flat, up, this.pitch);
-
-      const look = pos.clone().add(fwd);
-      if (shake) { pos.add(shake); look.add(shake); }
-      this.camera.position.copy(pos);
-      this.camera.up.copy(up);
-      this.camera.lookAt(look);
     }
 
     // Replay director: chase shot behind the car looking at the ball, cutting to a wide shot
@@ -244,10 +289,9 @@ Game.ChaseCamera = (function () {
       if (this.hfov !== null || this.camera.fov !== 80) this.applyFov(80);
       this.camera.position.copy(p);
       this.camera.up.copy(WORLD_UP);
-      this.up.copy(WORLD_UP);
       this.camera.lookAt(l);
     }
   }
 
-  return { ChaseCamera };
+  return { ChaseCamera, M };
 })();

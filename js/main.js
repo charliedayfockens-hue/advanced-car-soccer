@@ -570,7 +570,7 @@
     } else {
       chase.update(dt, carDraw[0].pos, carDraw[0].quat, me.speed, ballDraw.pos, paused ? null : I, shake,
         { onGround: world.car.state.isOnGround, groundNormal: wheelGroundNormal(world.car),
-          flipping: !world.car.state.isOnGround && world.car.state.hasFlipped && world.car.state.flipTime < 0.9 });
+          velocity: toThreePos(world.car.body.linVel), supersonic: me.supersonic });
     }
     effects.setViewportHeight(window.innerHeight, chase.camera.fov);
     ema('camera', performance.now() - t0);
