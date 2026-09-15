@@ -721,5 +721,68 @@ Game.View = (function () {
     }
   }
 
-  return { CarView, BallView, BallArrow, CARS, toThreePos, toThreeQuat, loadModels, onModels, renderThumbnail };
+  // Name plate above a car, as in Rocket League: the driver's name on a team-coloured tag, constant size on screen
+  class Nametag {
+    constructor(scene) {
+      this.canvas = document.createElement('canvas');
+      this.canvas.width = 512; this.canvas.height = 128;
+      this.texture = new THREE.CanvasTexture(this.canvas);
+      this.texture.encoding = THREE.sRGBEncoding;
+      this.material = new THREE.SpriteMaterial({ map: this.texture, transparent: true, depthWrite: false, depthTest: false, sizeAttenuation: false, toneMapped: false });
+      this.sprite = new THREE.Sprite(this.material);
+      this.sprite.center.set(0.5, 0);
+      this.sprite.renderOrder = 30;
+      this.sprite.visible = false;
+      scene.add(this.sprite);
+      this.scene = scene;
+      this.key = '';
+    }
+
+    set(name, teamHex) {
+      const key = name + '|' + teamHex;
+      if (key === this.key) return;
+      this.key = key;
+      const c = this.canvas.getContext('2d'), W = 512, H = 128;
+      c.clearRect(0, 0, W, H);
+      c.font = 'italic 700 54px "Chakra Petch", "Segoe UI", sans-serif';
+      const tw = Math.min(W - 16, c.measureText(name).width + 64);
+      const x = (W - tw) / 2, y = 22, h = 84, r = 16;
+      const col = new THREE.Color(teamHex);
+      c.beginPath();
+      c.moveTo(x + r, y);
+      c.arcTo(x + tw, y, x + tw, y + h, r);
+      c.arcTo(x + tw, y + h, x, y + h, r);
+      c.arcTo(x, y + h, x, y, r);
+      c.arcTo(x, y, x + tw, y, r);
+      c.closePath();
+      c.fillStyle = `rgba(${Math.round(col.r * 140)}, ${Math.round(col.g * 140)}, ${Math.round(col.b * 140)}, 0.82)`;
+      c.fill();
+      c.lineWidth = 5;
+      c.strokeStyle = '#' + col.getHexString();
+      c.stroke();
+      c.fillStyle = '#ffffff';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.shadowColor = 'rgba(0, 0, 0, 0.6)';
+      c.shadowBlur = 8;
+      c.fillText(name, W / 2, y + h / 2 + 3, W - 60);
+      this.texture.needsUpdate = true;
+    }
+
+    update(carPos, visible, camera) {
+      this.sprite.visible = visible;
+      if (!visible) return;
+      this.sprite.position.set(carPos.x, carPos.y + 95, carPos.z);
+      this.sprite.scale.set(0.2, 0.05, 1);
+      this.material.opacity = camera.position.distanceTo(carPos) > 7000 ? 0.55 : 1;
+    }
+
+    dispose() {
+      this.scene.remove(this.sprite);
+      this.material.dispose();
+      this.texture.dispose();
+    }
+  }
+
+  return { CarView, BallView, BallArrow, Nametag, CARS, toThreePos, toThreeQuat, loadModels, onModels, renderThumbnail };
 })();

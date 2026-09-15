@@ -1,0 +1,17 @@
+Sound sources used by Advanced Car Ball (assets/audio/sfx). All are CC0 1.0 (public domain); credit is
+appreciated but not required. Files were trimmed, layered, normalised and looped for the game.
+
+Kenney (www.kenney.nl), CC0 1.0
+  Impact Sounds   -> ball_hit_*, bounce_*, land_*, bump_*
+  Sci-fi Sounds   -> ball_ring_*, demo, sonic_boom, goal_classic, goal_fireworks, goal_hellfire, goal_dragons,
+                     boost_loop, engine_loop
+  Interface Sounds -> pickup_small, pickup_big, flip_reset, count_tick, count_go, ui_hover, ui_select
+
+rubberduck (opengameart.org), CC0 1.0
+  50 CC0 Sci-Fi SFX (sci-fi-sfx.zip) -> replay_whoosh, goal_voxel
+  100 CC0 SFX (100-CC0-SFX.zip)      -> firework_pop, pop_*
+
+SFXMint (sfxmint.com), CC0 1.0 (AI-generated / procedural)
+  Crowd Cheering 06, 11, 08 -> cheer_1, cheer_2, cheer_3
+
+Other files in assets/audio (boost_alpha_*, jump, second_jump) were supplied by the project owner.

@@ -29,6 +29,8 @@
   const ballView = new Game.View.BallView(scene, RL.BALL_COLLISION_RADIUS_SOCCAR);
   const ballArrow = new Game.View.BallArrow(scene);
   const effects = new Game.Effects.Effects(scene);
+  effects.onPop = pos => Game.Audio.pop(pos);
+  effects.onFirework = (pos, generation) => Game.Audio.firework(pos, generation);
   const chase = new Game.ChaseCamera.ChaseCamera(window.innerWidth / Math.max(window.innerHeight, 1));
   const recorder = new Game.Replay.Recorder(9);
 
@@ -36,6 +38,7 @@
   const session = { mode: 'freeplay', opponent: null, bots: [], clock: 0, overtime: false, matchOver: false };
   let stadium = null, builtTheme = null;
   let carViews = [];
+  let nametags = [];
 
   // ---------- post processing ----------
   let composer = null, bloom = null, speedPass = null;
@@ -91,6 +94,9 @@
       return v;
     });
     Game.View.onModels(() => carViews.forEach(v => applyEnv(v.group)));
+    // Name plates for every other car (your own isn't shown, like Rocket League)
+    nametags.forEach(t => t && t.dispose());
+    nametags = world.cars.map((car, i) => (i === 0 ? null : new Game.View.Nametag(scene)));
     syncRender();
   }
 
@@ -176,7 +182,8 @@
     score.blue = score.orange = 0;
     setScoreboard();
     const oppName = session.opponent ? session.opponent.name.toUpperCase() : '';
-    Game.UI.setMatchInfo(mode === '1v1' ? { blueName: 'YOU', orangeName: oppName, modeLabel: '1V1 MATCH' }
+    const playerName = (S.get('profile').name || '').trim().toUpperCase() || 'YOU';
+    Game.UI.setMatchInfo(mode === '1v1' ? { blueName: playerName, orangeName: oppName, modeLabel: '1V1 MATCH' }
       : mode === '2v2' ? { blueName: 'YOUR TEAM', orangeName: oppName, modeLabel: '2V2 MATCH' }
         : { blueName: 'BLUE', orangeName: 'ORANGE', modeLabel: 'FREE PLAY' });
     Game.UI.hideMainMenu();
@@ -229,8 +236,9 @@
     Game.UI.setScore(score.blue, score.orange, team);
     stadium.setScore(score.blue, score.orange);
     const pos = toThreePos(world.ball.pos);
-    effects.goalExplosion(pos, TEAM_COLOR[team]);
-    Game.Audio.goal();
+    const explosion = scorerExplosion(team);
+    effects.goalExplosion(pos, TEAM_COLOR[team], explosion);
+    Game.Audio.goal(explosion, pos);
     Game.UI.showGoal(team);
 
     if (session.mode === 'freeplay' && S.get('training').disableGoalReset) {
@@ -239,9 +247,19 @@
     }
     if (session.mode !== 'freeplay' && session.overtime) session.matchOver = true;
     state = 'goal';
-    goal = { team, time: simTime, pos, t: 0 };
+    goal = { team, time: simTime, pos, t: 0, explosion };
     lockBallCam(true);
     hideBall();
+  }
+
+  // The scorer's goal explosion: the last car on the scoring team to touch the ball. You get your garage pick,
+  // bots use Classic.
+  function scorerExplosion(team) {
+    let best = -1, bestTick = -Infinity;
+    world.cars.forEach((car, i) => {
+      if (car.team === team && car.lastBallTouchTick !== undefined && car.lastBallTouchTick > bestTick) { best = i; bestTick = car.lastBallTouchTick; }
+    });
+    return best === 0 ? S.get('garage').explosion : 'classic';
   }
 
   // Ball cam is unavailable from a goal until the next kickoff, when the player's choice comes back.
@@ -259,7 +277,7 @@
     const clip = recorder.freeze(goal.time - 5.5, goal.time + 1.3);
     Game.UI.hideGoal();
     if (clip.frames.length < 20) return afterReplay();
-    replay = { clip, t: clip.startTime, goalTime: goal.time, team: goal.team, exploded: false, pos: goal.pos };
+    replay = { clip, t: clip.startTime, goalTime: goal.time, team: goal.team, exploded: false, pos: goal.pos, explosion: goal.explosion };
     state = 'replay';
     chase.replayPos = null;
     Game.UI.showReplay(true);
@@ -313,7 +331,7 @@
       onAgain: () => startSession(session.mode, session.opponent.id),
       onMenu: goToMenu
     });
-    if (win) Game.Audio.goal();
+    if (win) Game.Audio.goal('partyTime');
   }
 
   function updateMatchClock(dt) {
@@ -343,20 +361,25 @@
     for (const e of ev) {
       const car = world.cars[e.car];
       switch (e.type) {
-        case 'ballHit':
-          Game.Audio.carBallHit(e.strength);
-          if (car) effects.ballHit(toThreePos(world.ball.pos).lerp(toThreePos(car.body.pos), 0.45), e.strength);
+        case 'ballHit': {
+          const ballPos = toThreePos(world.ball.pos);
+          Game.Audio.carBallHit(e.strength, ballPos);
+          if (car) {
+            const carPos = toThreePos(car.body.pos);
+            // Contact point on the ball's surface, facing the car
+            const normal = carPos.clone().sub(ballPos).normalize();
+            effects.ballHit(ballPos.clone().addScaledVector(normal, RL.BALL_COLLISION_RADIUS_SOCCAR), e.strength, normal);
+          }
           break;
-        case 'ballBounce': Game.Audio.ballBounce(e.strength); break;
-        case 'carImpact':
-          Game.Audio.carImpact(e.strength);
-          if (car) effects.dust(toThreePos(car.body.pos), e.strength);
-          break;
-        case 'bump': Game.Audio.carImpact(e.strength); break;
+        }
+        case 'ballBounce': Game.Audio.ballBounce(e.strength, toThreePos(world.ball.pos)); break;
+        case 'carImpact': if (car) Game.Audio.carImpact(e.strength, toThreePos(car.body.pos)); break;
+        case 'bump': Game.Audio.bump(e.strength, toThreePos(world.cars[e.victim].body.pos)); break;
         case 'demo': {
           const victim = world.cars[e.victim];
-          effects.goalExplosion(toThreePos(victim.body.pos), victim.team === 'blue' ? TEAM_COLOR.blue : TEAM_COLOR.orange);
-          Game.Audio.sonicBoom();
+          const at = toThreePos(victim.body.pos);
+          effects.demolition(at);
+          Game.Audio.demolition(at);
           if (e.attacker === 0) Game.UI.toast('DEMOLITION!');
           if (e.victim === 0) Game.UI.toast('DEMOLISHED');
           break;
@@ -376,8 +399,8 @@
           }
           break;
         case 'boostPickup':
-          if (car) effects.boostPickup(toThreePos(car.body.pos), e.big);
-          if (e.car === 0) Game.Audio.uiSelect();
+          if (car) effects.boostPickup(toThreePos(car.body.pos).setY(0), e.big);
+          if (e.car === 0) Game.Audio.boostPickup(e.big);
           break;
       }
     }
@@ -490,8 +513,8 @@
         r.t += dt * (nearGoal ? 0.35 : 1);
         if (!r.exploded && r.t >= r.goalTime) {
           r.exploded = true;
-          effects.goalExplosion(r.pos, TEAM_COLOR[r.team]);
-          Game.Audio.goal();
+          effects.goalExplosion(r.pos, TEAM_COLOR[r.team], r.explosion);
+          Game.Audio.goal(r.explosion, r.pos);
         }
         Game.UI.setReplayProgress((r.t - r.clip.startTime) / (r.clip.endTime - r.clip.startTime));
         if (r.t >= r.clip.endTime || (I.wasPressed('jump') && r.t - r.clip.startTime > 0.3)) afterReplay();
@@ -559,16 +582,23 @@
         if (v.boostStyle === 'alpha') effects.boostAlpha(i, carDraw[i].pos, carDraw[i].quat, vel, d.supersonic, dt);
         else effects.boost(i, carDraw[i].pos, carDraw[i].quat, vel, d.supersonic, dt);
       }
+      if (!paused) effects.supersonic(i, carDraw[i].pos, carDraw[i].quat, d.supersonic && !inMenu);
+    });
+    // Name plates: bot names over their cars in team colour
+    nametags.forEach((tag, i) => {
+      if (!tag) return;
+      const bot = session.bots.find(b => b.index === i);
+      const name = session.mode === '2v2' && world.cars[i].team === world.cars[0].team ? 'TEAMMATE · ' + (session.opponent ? session.opponent.name : 'BOT')
+        : bot && session.opponent ? session.opponent.name : 'BOT';
+      tag.set(name.toUpperCase(), TEAM_COLOR[world.cars[i].team] || TEAM_COLOR.orange);
+      tag.update(carDraw[i].pos, !inMenu && !!datas[i] && !datas[i].demoed, chase.camera);
     });
     ballView.update(ballDraw.pos, ballDraw.quat);
     ballArrow.update(dt, carDraw[0].pos, carDraw[0].quat, ballDraw.pos,
       chase.ballCam && !inMenu && !inReplay && ballVisible && !!datas[0] && !datas[0].demoed);
 
     const me = datas[0] || { supersonic: false, boosting: false, speed: 0 };
-    if (!paused && !inMenu && me.supersonic && !wasSupersonic) {
-      effects.sonicBoom(carDraw[0].pos, carDraw[0].quat);
-      Game.Audio.sonicBoom();
-    }
+    if (!paused && !inMenu && me.supersonic && !wasSupersonic) Game.Audio.sonicBoom();
     wasSupersonic = me.supersonic;
     const sonic = me.supersonic && !inMenu;
     speedAmount += ((sonic ? 1 : 0) - speedAmount) * (1 - Math.exp(-(sonic ? 6 : 3) * dt));
@@ -601,7 +631,8 @@
         { onGround: world.car.state.isOnGround, groundNormal: wheelGroundNormal(world.car),
           velocity: toThreePos(world.car.body.linVel), supersonic: me.supersonic });
     }
-    effects.setViewportHeight(window.innerHeight, chase.camera.fov);
+    effects.setViewportHeight(window.innerHeight * renderer.getPixelRatio(), chase.camera.fov);
+    Game.Audio.setListener(chase.camera);
     ema('camera', performance.now() - t0);
 
     Game.Audio.update({
