@@ -1,6 +1,6 @@
-// Car and ball visuals. The car is an original boxy hot-hatch design built from primitives and
-// sized around the simulated Octane hitbox; wheels follow the simulated suspension length,
-// steering angle and ground speed.
+// Car and ball visuals. Cars come from the garage models (assets/cars), fitted to the simulated Octane
+// hitbox; a boxy hot-hatch built from primitives stands in until a model has loaded (or if it fails).
+// Wheels follow the simulated suspension length, steering angle and ground speed.
 // Local car frame in three.js: +X forward, +Y up, +Z right (RL local x, z, y). Car origin sits
 // 17uu above the ground at rest.
 window.Game = window.Game || {};
@@ -48,76 +48,203 @@ Game.View = (function () {
     return m;
   }
 
-  // ---------------- imported models (assets/car, assets/ball) ----------------
+  // ---------------- garage cars and the ball model ----------------
+  const CARS = [
+    { id: 'surbabu', name: 'Surbabu', type: 'fbx', url: 'assets/cars/surbabu/surbabu.fbx', desc: 'Turbo rally sedan with a tall rear wing.' },
+    { id: 'nixxan', name: 'Nixxan Silaiva', type: 'obj', url: 'assets/cars/nixxan/nixxan.obj', desc: 'Light 90s drift coupe with pop-up attitude.' }
+  ];
+
   const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAMAASsJTYQAAAAASUVORK5CYII=';
-  const models = { ready: false, car: null, ball: null, listeners: [] };
+  const models = { ready: false, cars: {}, ball: null, listeners: [] };
 
   function onModels(fn) { if (models.ready) fn(models); else models.listeners.push(fn); }
 
   function loadModels() {
-    if (models.loading || !THREE.FBXLoader) {
-      if (!THREE.FBXLoader) { models.ready = true; }
-      return;
-    }
+    if (models.loading) return;
     models.loading = true;
-    // The FBX files point at textures on their authors' disks; we assign ours afterwards
+    // Model files point at textures on their authors' disks; we assign ours afterwards
     const manager = new THREE.LoadingManager();
-    manager.setURLModifier(url => (/\.(png|jpe?g|tga)$/i.test(url) ? BLANK_PNG : url));
-    const loader = new THREE.FBXLoader(manager);
-    const tex = (url, srgb) => { const t = Game.Assets.texture(url); if (srgb) t.encoding = THREE.sRGBEncoding; t.anisotropy = 8; return t; };
+    manager.setURLModifier(url => (/\.(png|jpe?g|tga|dds)$/i.test(url) ? BLANK_PNG : url));
+    const tex = (url, srgb) => {
+      const t = Game.Assets.texture(url);
+      if (srgb) t.encoding = THREE.sRGBEncoding;
+      t.anisotropy = 8;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      return t;
+    };
+    const base = url => url.slice(0, url.lastIndexOf('/') + 1);
     // Downloads are checked by Game.Assets so a broken deploy is reported instead of silently skipped
-    const loadFbx = url => Game.Assets.fetchChecked(url, { kind: 'FBX', check: Game.Assets.isFbx })
-      .then(buf => loader.parse(buf, url.slice(0, url.lastIndexOf('/') + 1)))
-      .catch(err => { Game.Assets.report(err, url); return null; });
+    const loadFbx = url => (THREE.FBXLoader ? Game.Assets.fetchChecked(url, { kind: 'FBX', check: Game.Assets.isFbx })
+      .then(buf => new THREE.FBXLoader(manager).parse(buf, base(url)))
+      .catch(err => { Game.Assets.report(err, url); return null; }) : Promise.resolve(null));
+    const loadObj = url => (THREE.OBJLoader ? Game.Assets.fetchChecked(url, { kind: 'OBJ', check: Game.Assets.isObj })
+      // Drop stray line elements: OBJLoader turns any object containing a line into line segments, losing its faces
+      .then(buf => new THREE.OBJLoader(manager).parse(new TextDecoder().decode(buf).replace(/^l\s.*$/gm, '')))
+      .catch(err => { Game.Assets.report(err, url); return null; }) : Promise.resolve(null));
 
-    Promise.all([loadFbx('assets/car/Fennec.fbx'), loadFbx('assets/ball/Ball.fbx')]).then(([car, ball]) => {
-      try { if (car) models.car = prepareCar(car, tex); } catch (e) { console.warn('Car model setup failed', e); }
+    const jobs = CARS.map(car => (car.type === 'fbx' ? loadFbx(car.url) : loadObj(car.url)).then(obj => {
+      try { if (obj) models.cars[car.id] = PREPARE[car.id](obj, tex); } catch (e) { console.warn(car.name + ' model setup failed', e); }
+    }));
+    jobs.push(loadFbx('assets/ball/Ball.fbx').then(ball => {
       try { if (ball) models.ball = prepareBall(ball, tex); } catch (e) { console.warn('Ball model setup failed', e); }
+    }));
+    Promise.all(jobs).then(() => {
       models.ready = true;
       models.listeners.splice(0).forEach(fn => fn(models));
     });
   }
 
-  // Model frame: +X forward, +Y up, +Z left, uu, ground at y = -1.5. Wheels are separate meshes.
-  function prepareCar(obj, tex) {
-    const T = n => 'assets/car/' + n;
-    const chassis = new THREE.MeshStandardMaterial({ map: tex(T('Chassis_Grain_D.png'), true), normalMap: tex(T('Chassis_Grain_N.png')), roughness: 0.55, metalness: 0.35 });
-    const glass = new THREE.MeshPhysicalMaterial({ color: 0x05070b, roughness: 0.05, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03 });
-    const lamp = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xe8f6ff, emissiveIntensity: 1.8 });
-    const rim = new THREE.MeshStandardMaterial({ map: tex(T('Alpha_D.png'), true), normalMap: tex(T('Alpha_N.png')), roughness: 0.3, metalness: 0.85 });
-    const tread = new THREE.MeshStandardMaterial({ color: 0x141416, normalMap: tex(T('NormalMap.png')), roughness: 0.9 });
-    const role = r => { const m = new THREE.MeshStandardMaterial(); m.userData.role = r; return m; };
-    const primary = role('primary'), accent = role('accent');
-    const pick = m => {
-      const n = m.name || '';
-      if (/chassis/i.test(n)) return chassis;
-      if (/window/i.test(n)) return glass;
-      if (/headlight/i.test(n)) return lamp;
-      if (/rim/i.test(n)) return rim;
-      if (/tread/i.test(n)) return tread;
-      if (/body/i.test(n)) return primary;
-      if (/paint/i.test(n)) return accent;
-      return chassis;
-    };
-    const wheelIndex = { FR: 0, FL: 1, BR: 2, BL: 3 };
-    const out = { body: null, wheels: [] };
-    obj.updateMatrixWorld(true);
-    obj.traverse(o => {
-      if (!o.isMesh) return;
-      const mats = [].concat(o.material).map(pick);
-      const geo = o.geometry.clone().applyMatrix4(o.matrixWorld);
-      const m = /_(FL|FR|BL|BR)_/.exec(o.name);
-      if (m) {
-        geo.computeBoundingBox();
-        const bb = geo.boundingBox, c = bb.getCenter(new THREE.Vector3());
-        geo.translate(-c.x, -c.y, -c.z);
-        out.wheels.push({ geometry: geo, material: mats.length === 1 ? mats[0] : mats, index: wheelIndex[m[1]], radius: (bb.max.y - bb.min.y) / 2 });
-      } else {
-        out.body = { geometry: geo, material: mats.length === 1 ? mats[0] : mats };
-      }
+  // Materials the car view swaps for its own team paint
+  const role = r => { const m = new THREE.MeshStandardMaterial(); m.userData.role = r; return m; };
+
+  // Model space: metres, +Z forward, +X left, +Y up, ground at y = 0.
+  // Wheels are scaled uniformly so the tires match the simulated wheel radius, which also puts the roof at
+  // the hitbox top; the body is stretched to the Octane hitbox's length and width so both cars share it.
+  const FIT = { length: 126, width: 84, hitboxCenterX: 13.88, groundY: -17, wheelRadius: 13.75 };
+  const wheelIndexOf = c => (c.z > 0 ? 0 : 2) + (c.x > 0 ? 1 : 0); // sim wheels: 0 FR, 1 FL, 2 BR, 3 BL
+
+  // parts: [{ geometry (model space), material, wheel: null | { tire, spins } }]
+  function buildCar(parts) {
+    const box = new THREE.Box3();
+    parts.forEach(p => { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox); p.center = p.geometry.boundingBox.getCenter(new THREE.Vector3()); });
+    const tires = parts.filter(p => p.wheel && p.wheel.tire);
+    const tb = tires[0].geometry.boundingBox;
+    const sL = FIT.length / (box.max.z - box.min.z), sW = FIT.width / (box.max.x - box.min.x);
+    const sH = FIT.wheelRadius / ((tb.max.y - tb.min.y) / 2);
+    const cz = (box.min.z + box.max.z) / 2;
+    // model (x, y, z) -> car (z * sL, y * sH, -x * sW), centred on the hitbox and standing on the ground
+    const bodyM = new THREE.Matrix4().set(
+      0, 0, sL, FIT.hitboxCenterX - cz * sL,
+      0, sH, 0, FIT.groundY - box.min.y * sH,
+      -sW, 0, 0, 0,
+      0, 0, 0, 1);
+    const wheelM = new THREE.Matrix4().set(0, 0, sH, 0, 0, sH, 0, 0, -sH, 0, 0, 0, 0, 0, 0, 1);
+    const out = { body: [], wheels: [[], [], [], []], anchors: [], radius: FIT.wheelRadius };
+    const centres = [];
+    tires.forEach(p => { centres[wheelIndexOf(p.center)] = p.center; });
+    parts.forEach(p => {
+      if (!p.wheel) { out.body.push({ geometry: p.geometry.applyMatrix4(bodyM), material: p.material }); return; }
+      const i = wheelIndexOf(p.center), c = centres[i];
+      if (!c) return;
+      out.wheels[i].push({ geometry: p.geometry.translate(-c.x, -c.y, -c.z).applyMatrix4(wheelM), material: p.material, spins: p.wheel.spins });
     });
+    centres.forEach((c, i) => { out.anchors[i] = c.clone().applyMatrix4(bodyM); });
     return out;
   }
+
+  function meshParts(obj, pick, wheelOf, skip) {
+    const parts = [];
+    obj.updateMatrixWorld(true);
+    obj.traverse(o => {
+      if (!o.isMesh || !o.geometry.attributes.position || !o.geometry.attributes.position.count) return;
+      if (skip && skip(o)) return;
+      const src = [].concat(o.material);
+      const mats = src.map(m => pick(m.name || '', o.name));
+      const names = src.map(m => m.name || '').join(' ');
+      parts.push({ geometry: o.geometry.clone().applyMatrix4(o.matrixWorld), material: mats.length === 1 ? mats[0] : mats, wheel: wheelOf(o, names) });
+    });
+    return parts;
+  }
+
+  // Surbabu (FBX): wheels are Tire / Rim / BrakeDisc / Calliper meshes per corner
+  function prepareSurbabu(obj, tex) {
+    const T = (n, srgb) => tex('assets/cars/surbabu/' + n, srgb);
+    const S = 'Subaru_WRXSTITNR_2018_';
+    const std = o => new THREE.MeshStandardMaterial(o);
+    const grille = n => std({ map: T(S + n + '_DiffuseAOSO.png', true), normalMap: T(S + n + '_Normal.png'), roughness: 0.6, alphaTest: 0.5, side: THREE.DoubleSide });
+    const M = {
+      disc: std({ map: T('BrakeDisc_ForgedDrilled_DiffuseAOSO.png', true), normalMap: T('BrakeDisc_ForgedDrilled_Normal.png'), metalness: 0.8, roughness: 0.45 }),
+      rim: std({ map: T('TNR_Rim89A_DiffuseAOSO.png', true), normalMap: T('TNR_Rim89A_Normal.png'), metalness: 0.85, roughness: 0.3 }),
+      tire: std({ map: T('TOYO_ProxesR888_A_DiffuseAOSO.png', true), normalMap: T('TOYO_ProxesR888_A_Normal.png'), roughness: 0.92 }),
+      calliper: std({ color: 0xc8102e, metalness: 0.35, roughness: 0.35 }),
+      interior: std({ map: T('InteriorA_DiffuseAOSO.png', true), normalMap: T(S + 'InteriorA_Normal.png'), roughness: 0.85, alphaTest: 0.5 }),
+      tilling: std({ map: T(S + 'InteriorTillingA_DiffuseAOSO.png', true), normalMap: T(S + 'InteriorTillingA_Normal.png'), roughness: 0.85 }),
+      badge: std({ map: T('BadgeA_DiffuseAOSO.png', true), normalMap: T(S + 'BadgeA_Normal.png'), metalness: 0.7, roughness: 0.3, alphaTest: 0.5 }),
+      base: std({ color: 0x0d0e10, roughness: 0.95 }),
+      carbon: std({ map: T('common_carbon05_black_diff.png', true), normalMap: T('common_carbon05_norm.png'), metalness: 0.2, roughness: 0.35 }),
+      coloured: std({ map: T('Global_Texture_Coloured_Diffuse.png', true), roughness: 0.6 }),
+      grille1: std({ map: T('Grille1A_DiffuseAOSO.png', true), normalMap: T(S + 'Grille1A_Normal.png'), roughness: 0.6, alphaTest: 0.5, side: THREE.DoubleSide }),
+      grille2: grille('Grille2A'), grille4: grille('Grille4A'), grille8: grille('Grille8A'), grille9: grille('Grille9A'), hoodGrille: grille('Hood0a_Grille1'),
+      light: std({ map: T('LightA_Diffuse.png', true), emissiveMap: T(S + 'LightA_Emissive.png', true), emissive: 0xffffff, emissiveIntensity: 1.2, metalness: 0.4, roughness: 0.2 }),
+      plate: std({ map: T(S + 'ManufacturerPlateA_Diffuse.png', true), roughness: 0.5 }),
+      glass: new THREE.MeshPhysicalMaterial({ color: 0x0a0f18, roughness: 0.05, metalness: 0.2, clearcoat: 1, transparent: true, opacity: 0.75 }),
+      lightGlass: new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.05, transparent: true, opacity: 0.25, depthWrite: false }),
+      tailGlass: std({ color: 0xff1a2a, emissive: 0xff0018, emissiveIntensity: 0.8, transparent: true, opacity: 0.85 }),
+      amberGlass: std({ color: 0xff8a1a, emissive: 0xff6a00, emissiveIntensity: 0.5, transparent: true, opacity: 0.85 }),
+      trim: std({ color: 0x0b0c0e, roughness: 0.5 })
+    };
+    const primary = role('primary'), accent = role('accent');
+    const pick = (n, mesh) => {
+      if (/BrakeDisc/.test(n)) return M.disc;
+      if (/TNR_Rim/.test(n)) return M.rim;
+      if (/TireBlur/.test(n)) return M.tire;
+      if (/Calliper|phong1/.test(n)) return M.calliper;
+      if (/InteriorTilling/.test(n)) return M.tilling;
+      if (/InteriorA/.test(n)) return M.interior;
+      if (/BadgeA/.test(n)) return M.badge;
+      if (/Base_Material/.test(n)) return M.base;
+      if (/Carbon/.test(n)) return M.carbon;
+      if (/Coloured/.test(n)) return M.coloured;
+      if (/Hood0a_Grille1/.test(n)) return M.hoodGrille;
+      if (/Grille1A/.test(n)) return M.grille1;
+      if (/Grille2A/.test(n)) return M.grille2;
+      if (/Grille4A/.test(n)) return M.grille4;
+      if (/Grille8A/.test(n)) return M.grille8;
+      if (/Grille9A/.test(n)) return M.grille9;
+      if (/LightA/.test(n)) return M.light;
+      if (/ManufacturerPlate/.test(n)) return M.plate;
+      if (/PaintTNR/.test(n)) return /Wing0a/.test(mesh) ? accent : primary;
+      if (/red_glass/.test(n)) return M.tailGlass;
+      if (/orange_glass/.test(n)) return M.amberGlass;
+      if (/glass_light/.test(n)) return M.lightGlass;
+      if (/glass_surr/.test(n)) return M.trim;
+      if (/Window/.test(n)) return M.glass;
+      return M.trim;
+    };
+    const wheelOf = (o, names) => (/TireBlur|TNR_Rim|BrakeDisc|Calliper|phong1/.test(names)
+      ? { tire: /TireBlur/.test(names), spins: !/Calliper|phong1/.test(names) } : null);
+    // The engine sits under a closed hood; skip its 32k triangles
+    return buildCar(meshParts(obj, pick, wheelOf, o => /Engine_Geo/.test(o.name)));
+  }
+
+  // Nixxan Silaiva (OBJ, no .mtl): materials are matched by their usemtl names
+  function prepareNixxan(obj, tex) {
+    const T = (n, srgb) => tex('assets/cars/nixxan/' + n, srgb);
+    const std = o => new THREE.MeshStandardMaterial(o);
+    const M = {
+      plastic: std({ color: 0x15171a, roughness: 0.7 }),
+      rubber: std({ color: 0x0a0a0b, roughness: 0.95 }),
+      mirror: std({ color: 0xdfe5ec, metalness: 1, roughness: 0.05 }),
+      chrome: std({ color: 0xd8dde4, metalness: 1, roughness: 0.15 }),
+      interior: std({ color: 0x1b1c1f, roughness: 0.85 }),
+      glass: new THREE.MeshPhysicalMaterial({ color: 0x0a0f18, roughness: 0.05, metalness: 0.2, clearcoat: 1, transparent: true, opacity: 0.75 }),
+      gloss: new THREE.MeshPhysicalMaterial({ color: 0x050506, roughness: 0.15, clearcoat: 1 }),
+      blinker: std({ color: 0xff8a1a, emissive: 0xff6a00, emissiveIntensity: 0.5, transparent: true, opacity: 0.85 }),
+      plate: std({ map: T('jpnumberplate_albedo.png', true), bumpMap: T('jpnumberplate_bump.png'), bumpScale: 0.02, roughness: 0.6 }),
+      plateBack: std({ color: 0xeeeeee, roughness: 0.6 }),
+      headlight: std({ map: T('Eb4Pd47HYQI.jpeg', true), normalMap: T('light1.png'), emissiveMap: T('Eb4Pd47HYQI.jpeg', true), emissive: 0xffffff, emissiveIntensity: 0.6, roughness: 0.15, metalness: 0.2 }),
+      logo: std({ map: T('9ydP3AMbsBk.jpeg', true), roughness: 0.4, metalness: 0.3 }),
+      disc: std({ color: 0x777b80, metalness: 0.8, roughness: 0.4 }),
+      tire: std({ color: 0x111113, normalMap: T('NORMAL.png'), roughness: 0.92 }),
+      rim: std({ color: 0xc9ced6, metalness: 0.9, roughness: 0.25 })
+    };
+    const primary = role('primary'), accent = role('accent');
+    const byName = {
+      body_paint: primary, body_paint2: accent,
+      body_plastic: M.plastic, wipper_plastic: M.plastic, headlight_pl: M.plastic, 'Material.004': M.plastic,
+      body_rubber: M.rubber, wipper_rubber: M.rubber, body_mirror: M.mirror,
+      body_chrome: M.chrome, headlight_chrome: M.chrome, exh_chrome: M.chrome, logo_chrome: M.chrome, wheel_bolt_FL: M.chrome,
+      body_focus: M.interior, 'focus_int.': M.interior, wheel_focus_FL: M.interior,
+      body_win: M.glass, body_win_frame: M.gloss, body_pianoblack: M.gloss, blinker_glass: M.blinker,
+      'number_tex,': M.plate, number_pl: M.plateBack, headlight_front_glass_tex: M.headlight, 'logo_panel.005': M.logo,
+      brake_disc: M.disc, brake_disc1: M.disc, wheel_tire_FL: M.tire, wheel_rims_FL: M.rim
+    };
+    const pick = n => byName[n] || M.plastic;
+    const wheelOf = o => (/^wheel_/.test(o.name) ? { tire: true, spins: true } : null);
+    return buildCar(meshParts(obj, pick, wheelOf));
+  }
+
+  const PREPARE = { surbabu: prepareSurbabu, nixxan: prepareNixxan };
 
   function prepareBall(obj, tex) {
     const B = n => 'assets/ball/' + n;
@@ -164,14 +291,16 @@ Game.View = (function () {
   }
 
   class CarView {
-    constructor(scene, sim, color, accentColor) {
+    constructor(scene, sim, color, accentColor, carId) {
       this.sim = sim;
+      this.carId = carId || CARS[0].id;
       this.accentColor = accentColor === undefined ? 0xff2fb3 : accentColor;
       this.group = new THREE.Group();
       this.body = new THREE.Group();
       this.group.add(this.body);
       this.wheelSpin = [0, 0, 0, 0];
       this.baseColor = color;
+      this.anchors = null;
 
       // hex colours are sRGB; the renderer works in linear space
       const srgb = hex => new THREE.Color(hex).convertSRGBToLinear();
@@ -213,8 +342,6 @@ Game.View = (function () {
         arch.lineTo(R + flat + 2, 14);
         arch.lineTo(-R - flat - 2, 14);
         arch.lineTo(-R - flat - 2, 0);
-        const hole = new THREE.Path();
-        hole.moveTo(-R - flat + 0.01, 0.01);
         const g = new THREE.ExtrudeGeometry(arch, { depth: 9, bevelEnabled: true, bevelThickness: 1.5, bevelSize: 1.5, bevelSegments: 2, curveSegments: 14 });
         g.translate(0, 0, -4.5);
         const m = new THREE.Mesh(g, paint);
@@ -283,7 +410,7 @@ Game.View = (function () {
       const tireMat = new THREE.MeshStandardMaterial({ color: 0x101012, roughness: 0.92 });
       const rimMat = new THREE.MeshStandardMaterial({ color: 0x25272d, roughness: 0.35, metalness: 0.85 });
       const hubMat = new THREE.MeshStandardMaterial({ color: 0xff2fb3, roughness: 0.3, metalness: 0.6 });
-      this.wheels = sim.wheels.map((w, i) => {
+      this.wheels = sim.wheels.map(w => {
         const r = w.radius * BT;
         const width = w.front ? 12 : 14;
         const pivot = new THREE.Group();
@@ -350,28 +477,32 @@ Game.View = (function () {
       onModels(m => this.useModel(m));
     }
 
-    // Swap the built-in body and wheels for the imported car model
+    // Swap the built-in body and wheels for this car's garage model
     useModel(m) {
-      if (!m.car || !m.car.body || this.disposed) return;
+      const car = m.cars && m.cars[this.carId];
+      if (!car || this.disposed) return;
       const swap = mat => (mat.userData.role === 'primary' ? this.paint : mat.userData.role === 'accent' ? this.roofMat : mat);
-      const bodyMat = Array.isArray(m.car.body.material) ? m.car.body.material.map(swap) : swap(m.car.body.material);
-      const body = new THREE.Mesh(m.car.body.geometry, bodyMat);
-      // mirror Z (model has +Z left), line its wheels up with the simulated wheel positions
-      body.scale.set(1, 1, -1);
-      body.position.set(5.8, -15.5, 0);
-      body.castShadow = true;
+      const mats = mat => (Array.isArray(mat) ? mat.map(swap) : swap(mat));
+      const body = new THREE.Group();
+      car.body.forEach(p => {
+        const mesh = new THREE.Mesh(p.geometry, mats(p.material));
+        mesh.castShadow = true;
+        body.add(mesh);
+      });
       this.group.add(body);
       this.body.visible = false;
       this.modelBody = body;
-      m.car.wheels.forEach(w => {
-        const v = this.wheels[w.index];
-        if (!v) return;
+      this.anchors = car.anchors;
+      car.wheels.forEach((parts, i) => {
+        const v = this.wheels[i];
+        if (!v || !parts.length) return;
         v.spin.children.forEach(c => { c.visible = false; });
-        const mesh = new THREE.Mesh(w.geometry, w.material);
-        mesh.scale.set(1, 1, -1);
-        mesh.castShadow = true;
-        v.spin.add(mesh);
-        v.radius = w.radius;
+        parts.forEach(p => {
+          const mesh = new THREE.Mesh(p.geometry, mats(p.material));
+          mesh.castShadow = true;
+          (p.spins ? v.spin : v.pivot).add(mesh);
+        });
+        v.radius = car.radius;
       });
     }
 
@@ -425,8 +556,10 @@ Game.View = (function () {
 
       sim.wheels.forEach((w, i) => {
         const v = this.wheels[i];
-        const c = w.connectionCS;
-        v.pivot.position.set(c.x * BT, (c.z - d.wheels[i][0]) * BT, c.y * BT);
+        const c = w.connectionCS, a = this.anchors && this.anchors[i];
+        // Model wheels stay where the model puts them and move with the simulated suspension
+        if (a) v.pivot.position.set(a.x, a.y + (w.restLength - d.wheels[i][0]) * BT, a.z);
+        else v.pivot.position.set(c.x * BT, (c.z - d.wheels[i][0]) * BT, c.y * BT);
         v.pivot.rotation.y = -d.wheels[i][1];
         this.wheelSpin[i] -= (d.fwdSpeed / v.radius) * dt;
         v.spin.rotation.z = this.wheelSpin[i];
@@ -441,6 +574,43 @@ Game.View = (function () {
       });
       this.boostLight.intensity = d.boosting ? 2.2 + Math.random() * 0.6 : 0;
     }
+  }
+
+  // Garage preview: renders one car into an image with the main renderer
+  function renderThumbnail(renderer, carId, w, h, paint) {
+    const scene = new THREE.Scene();
+    scene.add(new THREE.HemisphereLight(0xe8f0ff, 0x1a1d24, 1.2));
+    const key = new THREE.DirectionalLight(0xffffff, 1.8);
+    key.position.set(250, 320, 180);
+    scene.add(key);
+    const back = new THREE.DirectionalLight(0x9fd8ff, 0.9);
+    back.position.set(-260, 120, -220);
+    scene.add(back);
+    const sim = new Game.CarSim(Game.CarConfigOctane);
+    const view = new CarView(scene, sim, paint[0], paint[1], carId);
+    view.update(new THREE.Vector3(), new THREE.Quaternion(), 0, CarView.liveData(sim));
+    const cam = new THREE.PerspectiveCamera(30, w / h, 10, 5000);
+    cam.position.set(205, 85, 175);
+    cam.lookAt(8, 6, 0);
+    const rt = new THREE.WebGLRenderTarget(w, h);
+    rt.texture.encoding = THREE.sRGBEncoding;
+    const prevTarget = renderer.getRenderTarget(), prevColor = renderer.getClearColor(new THREE.Color()), prevAlpha = renderer.getClearAlpha();
+    renderer.setRenderTarget(rt);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
+    renderer.render(scene, cam);
+    const px = new Uint8Array(w * h * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, w, h, px);
+    renderer.setRenderTarget(prevTarget);
+    renderer.setClearColor(prevColor, prevAlpha);
+    rt.dispose();
+    view.dispose();
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d'), img = ctx.createImageData(w, h);
+    for (let y = 0; y < h; y++) img.data.set(px.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4);
+    ctx.putImageData(img, 0, 0);
+    return canvas.toDataURL('image/png');
   }
 
   class BallView {
@@ -477,13 +647,16 @@ Game.View = (function () {
       this.mesh.castShadow = true;
       scene.add(this.mesh);
 
+      // Ring on the floor under the ball while it's in the air
       this.marker = new THREE.Mesh(
-        new THREE.CircleGeometry(radiusUU * 0.9, 32),
-        new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false })
+        new THREE.RingGeometry(0.72, 1, 64),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, toneMapped: false })
       );
       this.marker.rotation.x = -Math.PI / 2;
+      this.marker.renderOrder = 2;
       scene.add(this.marker);
       this.radiusUU = radiusUU;
+      this.visible = true;
       onModels(m => this.useModel(m));
     }
 
@@ -503,18 +676,50 @@ Game.View = (function () {
       this.mesh.add(group);
     }
 
-    setVisible(v) { this.mesh.visible = v; this.marker.visible = v; }
+    setVisible(v) { this.visible = v; this.mesh.visible = v; this.marker.visible = v; }
 
     update(position, quaternion) {
       this.mesh.position.copy(position);
       this.mesh.quaternion.copy(quaternion);
       const height = Math.max(0, position.y - 93);
-      this.marker.position.set(position.x, 1.5, position.z);
-      this.marker.material.opacity = Math.max(0, 0.38 - height / 5000);
-      const k = 1 + height / 2500;
-      this.marker.scale.set(k, k, k);
+      const show = Math.min(1, Math.max(0, (height - 60) / 140));
+      this.marker.visible = this.visible && show > 0;
+      this.marker.position.set(position.x, 2, position.z);
+      this.marker.material.opacity = 0.8 * show;
+      this.marker.scale.setScalar(this.radiusUU * (1.05 + Math.min(height, 2000) / 2000 * 0.5));
     }
   }
 
-  return { CarView, BallView, toThreePos, toThreeQuat, loadModels, onModels };
+  // Arrow on the ground around the player's car pointing toward the ball (shown in ball cam)
+  class BallArrow {
+    constructor(scene) {
+      const s = new THREE.Shape();
+      s.moveTo(20, 0); s.lineTo(-10, 14); s.lineTo(-3, 0); s.lineTo(-10, -14); s.closePath();
+      const g = new THREE.ShapeGeometry(s);
+      g.rotateX(-Math.PI / 2); // lie flat, pointing along +X
+      this.mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xeafcff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
+      this.mesh.renderOrder = 3;
+      this.mesh.visible = false;
+      this.opacity = 0;
+      scene.add(this.mesh);
+    }
+
+    update(dt, carPos, carQuat, ballPos, show) {
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(carQuat);
+      const toBall = ballPos.clone().sub(carPos);
+      const flat = toBall.addScaledVector(up, -toBall.dot(up));
+      const dist = flat.length();
+      const target = show && dist > 260 ? 0.85 : 0;
+      this.opacity += (target - this.opacity) * (1 - Math.exp(-10 * dt));
+      this.mesh.visible = this.opacity > 0.01 && dist > 1e-3;
+      this.mesh.material.opacity = this.opacity;
+      if (!this.mesh.visible) return;
+      flat.divideScalar(dist);
+      _m.makeBasis(flat, up, new THREE.Vector3().crossVectors(flat, up));
+      this.mesh.quaternion.setFromRotationMatrix(_m);
+      this.mesh.position.copy(carPos).addScaledVector(flat, 115).addScaledVector(up, -14);
+    }
+  }
+
+  return { CarView, BallView, BallArrow, CARS, toThreePos, toThreeQuat, loadModels, onModels, renderThumbnail };
 })();

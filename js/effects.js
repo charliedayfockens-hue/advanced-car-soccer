@@ -321,6 +321,16 @@ Game.Effects = (function () {
       }
     }
 
+    // Flip reset: a bright ring on the underside of the ball where the wheels touched it (normal = car up)
+    flipResetRing(pos, normal) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0xff5fe0, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 64), mat);
+      ring.position.copy(pos);
+      ring.lookAt(pos.clone().add(normal));
+      this.scene.add(ring);
+      this.rings.push({ mesh: ring, t: 0, dur: 0.75, min: 55, max: 150, fade: 1 });
+    }
+
     addShake(amount) { this.shake = Math.min(this.shake + amount, 3); }
 
     shakeOffset(dt, enabled) {
@@ -339,7 +349,7 @@ Game.Effects = (function () {
         const r = this.rings[i];
         r.t += dt;
         const k = Math.min(r.t / r.dur, 1);
-        const s = r.max * (1 - Math.pow(1 - k, 3));
+        const s = (r.min || 0) + (r.max - (r.min || 0)) * (1 - Math.pow(1 - k, 3));
         r.mesh.scale.set(s, s, s);
         r.mesh.material.opacity = (1 - k) * r.fade;
         if (k >= 1) {

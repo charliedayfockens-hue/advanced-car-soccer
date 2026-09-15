@@ -9,7 +9,7 @@
 window.Game = window.Game || {};
 
 Game.Assets = (function () {
-  const VERSION = '58'; // keep in step with index.html so hosts and CDNs don't serve stale copies
+  const VERSION = '59'; // keep in step with index.html so hosts and CDNs don't serve stale copies
   const reported = new Map();
 
   class AssetError extends Error {
@@ -118,5 +118,8 @@ Game.Assets = (function () {
     panel.appendChild(hint);
   }
 
-  return { VERSION, AssetError, fetchChecked, json, texture, isFbx, report, get problems() { return new Map(reported); } };
+  const isObj = (b, head) => /^(#|v |vn |vt |o |g |mtllib|usemtl)/m.test(head);
+  const isMp3 = b => (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0);
+
+  return { VERSION, AssetError, fetchChecked, json, texture, isFbx, isObj, isMp3, report, get problems() { return new Map(reported); } };
 })();

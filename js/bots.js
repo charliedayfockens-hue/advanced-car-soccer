@@ -343,7 +343,9 @@ Game.Bots = (function () {
     reset() { this.jumpTimer = 0; }
     tick() {
       const w = this.world, me = w.cars[this.index], c = this.controls;
-      const target = w.cars.find((car, i) => i !== this.index && !car.isDemoed);
+      // Hunt the nearest car on the other team
+      const target = w.cars.filter(car => car.team !== me.team && !car.isDemoed)
+        .sort((a, b) => a.body.pos.sub(me.body.pos).length2() - b.body.pos.sub(me.body.pos).length2())[0];
       c.jump = false;
       if (!target || me.isDemoed) {
         c.throttle = 0; c.steer = 0; c.yaw = 0; c.boost = false; c.handbrake = false;
@@ -415,8 +417,8 @@ Game.Bots = (function () {
 
   const OPPONENTS = [
     { id: 'element', name: 'Element', desc: 'Diamond-level challenger. A neural network by Rangler, trained with RLGym reinforcement learning (RLBotPack). Speed-flips kickoffs, shoots hard, challenges quickly and rotates back when beaten. A real test of your fundamentals.', modes: ['1v1'], make: (w, i) => new ElementBot(w, i), load: loadElement },
-    { id: 'bowie', name: 'Bowie Knife 99', desc: 'Bump and demo meme bot. It barely cares about the ball: it hunts you down, boosts to supersonic and tries to demolish you every chance it gets.', modes: ['1v1'], make: (w, i) => new BowieKnifeBot(w, i), load: () => Promise.resolve() },
-    { id: 'rookie', name: 'Rookie', desc: 'Simple ball chaser. Good for warming up.', modes: ['1v1'], make: (w, i) => new RookieBot(w, i), load: () => Promise.resolve() },
+    { id: 'bowie', name: 'Bowie Knife 99', desc: 'Bump and demo meme bot. It barely cares about the ball: it hunts you down, boosts to supersonic and tries to demolish you every chance it gets.', modes: ['1v1', '2v2'], make: (w, i) => new BowieKnifeBot(w, i), load: () => Promise.resolve() },
+    { id: 'rookie', name: 'Rookie', desc: 'Simple ball chaser. Good for warming up.', modes: ['1v1', '2v2'], make: (w, i) => new RookieBot(w, i), load: () => Promise.resolve() },
     { id: 'mirror', name: 'Mirror Bot', desc: 'Free play only. Copies every move you make in mirror image, from the other half of the field or the other side of it.', modes: ['freeplay'],
       team: opts => (opts && opts.mirrorAxis === 'sides' ? 'blue' : 'orange'), make: (w, i, opts) => new MirrorBot(w, i, opts), load: () => Promise.resolve() }
   ];
