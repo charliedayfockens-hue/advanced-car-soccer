@@ -466,3 +466,17 @@ body.supersonic #speed-value { text-shadow: 0 0 16px rgba(255, 220, 120, 0.8); }
   .setting-row { grid-template-columns: 1fr; }
   .setting-row.toggle-row, .setting-row.select-row { grid-template-columns: 1fr; }
 }
+.garage-section { margin-top: 18px; }
+.garage-explosions { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin-top: 8px; }
+.garage-explosion { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 12px; cursor: pointer; text-align: left; color: var(--text);
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s; font: inherit; }
+.garage-explosion:hover { transform: translateY(-2px); border-color: rgba(87, 217, 255, 0.5); }
+.garage-explosion.active { border-color: var(--orange); box-shadow: 0 0 22px rgba(255, 138, 43, 0.28), inset 0 0 22px rgba(255, 138, 43, 0.08); }
+.garage-explosion .garage-name { font-size: 16px; }
+.garage-rarity { align-self: flex-start; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; padding: 2px 7px; border-radius: 5px; }
+.rarity-default { background: rgba(255, 255, 255, 0.12); color: #d8dde6; }
+.rarity-import { background: rgba(230, 60, 60, 0.22); color: #ff8b8b; }
+.rarity-black-market { background: linear-gradient(90deg, rgba(120, 20, 60, 0.55), rgba(60, 10, 90, 0.55)); color: #ff86c8; }
+.garage-name-input { margin-top: 8px; width: min(320px, 100%); padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.3); color: var(--text); font: inherit; font-size: 16px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
+.garage-name-input:focus { outline: none; border-color: var(--orange); }

@@ -495,6 +495,29 @@ Game.UI = (function () {
       b.addEventListener('mouseenter', () => Game.Audio.uiHover());
       list.appendChild(b);
     });
+
+    // Goal explosions
+    const boom = $('garage-explosions');
+    boom.innerHTML = '';
+    const currentBoom = S.get('garage').explosion;
+    Game.Effects.EXPLOSIONS.forEach(x => {
+      const b = el('button', 'garage-explosion' + (x.id === currentBoom ? ' active' : ''));
+      b.dataset.id = x.id;
+      const rarity = el('div', 'garage-rarity rarity-' + x.rarity.toLowerCase().replace(/\s+/g, '-'), x.rarity);
+      b.append(rarity, el('div', 'garage-name', x.name), el('div', 'garage-desc', x.desc));
+      b.addEventListener('click', () => {
+        S.set('garage', 'explosion', x.id);
+        boom.querySelectorAll('.garage-explosion').forEach(y => y.classList.toggle('active', y.dataset.id === x.id));
+        Game.Audio.uiSelect();
+      });
+      b.addEventListener('mouseenter', () => Game.Audio.uiHover());
+      boom.appendChild(b);
+    });
+
+    // Player name (shown on the scoreboard and to others)
+    const nameInput = $('garage-name-input');
+    nameInput.value = S.get('profile').name;
+    nameInput.oninput = () => S.set('profile', 'name', nameInput.value.slice(0, 16));
     $('garage-modal').classList.remove('hidden');
   }
 

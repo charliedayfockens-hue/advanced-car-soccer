@@ -1,47 +1,52 @@
-// Game audio. Most sounds are synthesized with WebAudio (impacts, flips, goal explosion, countdown, UI
-// ticks, standard boost). Sample files cover the alpha boost (start, loop, release) and the first and
-// second jump; the synthesized versions play until those have loaded. One master level from Settings > Audio.
+// Game audio. Every sound is a recording (CC0 libraries: Kenney, rubberduck on OpenGameArt, SFXMint; see
+// assets/audio/CREDITS.txt) plus the alpha boost and jump samples, layered and varied in WebAudio:
+//  - hits, bounces, bumps, demolitions, goal explosions and balloon/firework pops play in 3D around the camera
+//  - variants are picked at random and pitched slightly so repeats don't sound identical
+//  - the boost roar and an engine hum loop seamlessly and follow speed, throttle and supersonic
+// One master level from Settings > Audio.
 window.Game = window.Game || {};
 
 Game.Audio = (function () {
-  let ctx = null, master = null, noiseBuf = null;
-  let boost = null, alphaBoost = null;
-  let volume = 0.6;
-
-  const SAMPLES = {
-    boostStart: 'assets/audio/boost_alpha_1.mp3',
-    boostEnd: 'assets/audio/boost_alpha_2.mp3',
-    boostLoop: 'assets/audio/boost_alpha_3.mp3',
-    jump: 'assets/audio/jump.mp3',
-    secondJump: 'assets/audio/second_jump.mp3'
+  const A = 'assets/audio/', X = A + 'sfx/';
+  const FILES = {
+    boostStart: A + 'boost_alpha_1.mp3', boostEnd: A + 'boost_alpha_2.mp3', boostAlphaLoop: A + 'boost_alpha_3.mp3',
+    jump: A + 'jump.mp3', secondJump: A + 'second_jump.mp3',
+    ballHit_1: X + 'ball_hit_1.mp3', ballHit_2: X + 'ball_hit_2.mp3', ballHit_3: X + 'ball_hit_3.mp3',
+    ballRing_1: X + 'ball_ring_1.mp3', ballRing_2: X + 'ball_ring_2.mp3',
+    bounce_1: X + 'bounce_1.mp3', bounce_2: X + 'bounce_2.mp3', bounce_3: X + 'bounce_3.mp3',
+    land_1: X + 'land_1.mp3', land_2: X + 'land_2.mp3',
+    bump_1: X + 'bump_1.mp3', bump_2: X + 'bump_2.mp3',
+    demo: X + 'demo.mp3', sonicBoom: X + 'sonic_boom.mp3',
+    pickupSmall: X + 'pickup_small.mp3', pickupBig: X + 'pickup_big.mp3', flipReset: X + 'flip_reset.mp3',
+    countTick: X + 'count_tick.mp3', countGo: X + 'count_go.mp3', replayWhoosh: X + 'replay_whoosh.mp3',
+    uiHover: X + 'ui_hover.mp3', uiSelect: X + 'ui_select.mp3',
+    goalClassic: X + 'goal_classic.mp3', goalFireworks: X + 'goal_fireworks.mp3', fireworkPop: X + 'firework_pop.mp3',
+    goalHellfire: X + 'goal_hellfire.mp3', goalDragons: X + 'goal_dragons.mp3', goalVoxel: X + 'goal_voxel.mp3',
+    pop_1: X + 'pop_1.mp3', pop_2: X + 'pop_2.mp3',
+    cheer_1: X + 'cheer_1.mp3', cheer_2: X + 'cheer_2.mp3', cheer_3: X + 'cheer_3.mp3',
+    boostLoop: X + 'boost_loop.mp3', engineLoop: X + 'engine_loop.mp3'
   };
-  const buffers = {};
-  let samplesRequested = false;
+  // Seamless loops: the files carry 0.25 s of wrap-around padding each side so encoder delay can't click
+  const LOOPS = { boostLoop: { start: 0.25, length: 3.6 }, engineLoop: { start: 0.25, length: 3.6 } };
+  const GOAL_SOUND = { classic: 'goalClassic', partyTime: 'goalClassic', fireworks: 'goalFireworks', hellfire: 'goalHellfire', dragons: 'goalDragons', voxel: 'goalVoxel' };
 
-  function loadSamples() {
-    if (samplesRequested) return;
-    samplesRequested = true;
-    Object.entries(SAMPLES).forEach(([key, url]) => {
+  let ctx = null, master = null, volume = 0.6, requested = false;
+  const buffers = {};
+  const loops = {};
+  let alphaBoost = null;
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+
+  function load() {
+    if (requested) return;
+    requested = true;
+    Object.entries(FILES).forEach(([key, url]) => {
       Game.Assets.fetchChecked(url, { kind: 'MP3', check: Game.Assets.isMp3 })
         .then(buf => ctx.decodeAudioData(buf))
         .then(audio => { buffers[key] = audio; })
         .catch(err => Game.Assets.report(err, url));
     });
-  }
-
-  function makeNoise() {
-    const len = ctx.sampleRate * 2;
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-    return buf;
-  }
-
-  function noiseSource(loop) {
-    const s = ctx.createBufferSource();
-    s.buffer = noiseBuf;
-    s.loop = !!loop;
-    return s;
   }
 
   function ensure() {
@@ -52,17 +57,10 @@ Game.Audio = (function () {
     master = ctx.createGain();
     master.gain.value = volume;
     const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -14; comp.knee.value = 12; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.18;
     master.connect(comp);
     comp.connect(ctx.destination);
-    noiseBuf = makeNoise();
-
-    // Standard boost: airy filtered noise, only audible while boosting
-    const bGain = ctx.createGain(); bGain.gain.value = 0;
-    const bFilter = ctx.createBiquadFilter(); bFilter.type = 'bandpass'; bFilter.frequency.value = 1400; bFilter.Q.value = 0.7;
-    const bSrc = noiseSource(true);
-    bSrc.connect(bFilter); bFilter.connect(bGain); bGain.connect(master); bSrc.start();
-    boost = { gain: bGain, filter: bFilter };
-    loadSamples();
+    load();
     return true;
   }
 
@@ -71,28 +69,88 @@ Game.Audio = (function () {
     if (master) master.gain.setTargetAtTime(volume, ctx.currentTime, 0.03);
   }
 
-  // Plays a loaded sample once; returns null if it hasn't loaded
-  function playSample(key, gain) {
-    const buffer = buffers[key];
-    if (!buffer || !ctx) return null;
+  // Random variant of a sound: 'ballHit' picks ballHit_1..n
+  function bufferFor(name) {
+    if (buffers[name]) return buffers[name];
+    const variants = [];
+    for (let i = 1; buffers[name + '_' + i] || FILES[name + '_' + i]; i++) if (buffers[name + '_' + i]) variants.push(buffers[name + '_' + i]);
+    return variants.length ? variants[Math.floor(Math.random() * variants.length)] : null;
+  }
+
+  function setVec(param3, v) {
+    if (param3[0].setTargetAtTime) { const t = ctx.currentTime; param3.forEach((p, i) => p.setValueAtTime(v[i], t)); }
+  }
+
+  // Camera position and orientation for 3D sounds (three.js world units)
+  const _f = new THREE.Vector3(), _u = new THREE.Vector3();
+  function setListener(camera) {
+    if (!ctx) return;
+    const L = ctx.listener, p = camera.position;
+    _f.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    _u.set(0, 1, 0).applyQuaternion(camera.quaternion);
+    if (L.positionX) {
+      setVec([L.positionX, L.positionY, L.positionZ], [p.x, p.y, p.z]);
+      setVec([L.forwardX, L.forwardY, L.forwardZ, L.upX, L.upY, L.upZ], [_f.x, _f.y, _f.z, _u.x, _u.y, _u.z]);
+    } else {
+      L.setPosition(p.x, p.y, p.z);
+      L.setOrientation(_f.x, _f.y, _f.z, _u.x, _u.y, _u.z);
+    }
+  }
+
+  // o: { gain, rate, pos (THREE.Vector3), ref (distance at full volume), rolloff, delay }
+  function play(name, o) {
+    if (!ensure()) return null;
+    o = o || {};
+    const buffer = bufferFor(name);
+    if (!buffer) return null;
     const src = ctx.createBufferSource();
     src.buffer = buffer;
+    src.playbackRate.value = o.rate || 1;
     const g = ctx.createGain();
-    g.gain.value = gain;
-    src.connect(g); g.connect(master);
-    src.start();
+    g.gain.value = o.gain === undefined ? 1 : o.gain;
+    src.connect(g);
+    let out = g;
+    if (o.pos) {
+      const pan = ctx.createPanner();
+      pan.panningModel = 'HRTF';
+      pan.distanceModel = 'inverse';
+      pan.refDistance = o.ref || 700;
+      pan.rolloffFactor = o.rolloff === undefined ? 0.8 : o.rolloff;
+      pan.maxDistance = 30000;
+      if (pan.positionX) setVec([pan.positionX, pan.positionY, pan.positionZ], [o.pos.x, o.pos.y, o.pos.z]);
+      else pan.setPosition(o.pos.x, o.pos.y, o.pos.z);
+      g.connect(pan);
+      out = pan;
+    }
+    out.connect(master);
+    src.start(ctx.currentTime + (o.delay || 0));
     return { src, g };
   }
 
-  // Alpha boost: ignition one-shot, then the loop fades in; letting go fades the loop and plays the release
+  function startLoop(name) {
+    const buffer = buffers[name], meta = LOOPS[name];
+    if (!buffer || loops[name]) return loops[name] || null;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    src.loopStart = meta.start;
+    src.loopEnd = meta.start + meta.length;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    src.connect(g); g.connect(master);
+    src.start(0, meta.start);
+    return (loops[name] = { src, g });
+  }
+
+  // Alpha boost: ignition one-shot, then its loop fades in; letting go fades the loop and plays the release
   function updateAlphaBoost(on, active, t) {
     if (on && !alphaBoost) {
-      const start = playSample('boostStart', 0.9);
+      const start = play('boostStart', { gain: 0.85 });
       const loopGain = ctx.createGain();
       loopGain.gain.setValueAtTime(0, t);
-      loopGain.gain.setTargetAtTime(0.75, t + 0.12, 0.08);
+      loopGain.gain.setTargetAtTime(0.7, t + 0.12, 0.08);
       const loop = ctx.createBufferSource();
-      loop.buffer = buffers.boostLoop;
+      loop.buffer = buffers.boostAlphaLoop;
       loop.loop = true;
       loop.connect(loopGain); loopGain.connect(master);
       loop.start(t);
@@ -100,116 +158,78 @@ Game.Audio = (function () {
     } else if (!on && alphaBoost) {
       alphaBoost.loopGain.gain.setTargetAtTime(0, t, 0.04);
       alphaBoost.loop.stop(t + 0.3);
-      if (alphaBoost.start) {
-        alphaBoost.start.g.gain.setTargetAtTime(0, t, 0.05);
-        alphaBoost.start.src.stop(t + 0.3);
-      }
-      if (active) playSample('boostEnd', 0.8);
+      if (alphaBoost.start) { alphaBoost.start.g.gain.setTargetAtTime(0, t, 0.05); alphaBoost.start.src.stop(t + 0.3); }
+      if (active) play('boostEnd', { gain: 0.75 });
       alphaBoost = null;
     }
   }
 
+  // s: { active, speed (uu/s), throttle, boosting, supersonic, alpha }
   function update(s) {
     if (!ctx || ctx.state !== 'running') return;
     const t = ctx.currentTime;
-    const useAlpha = !!(s.alpha && buffers.boostLoop);
+    const k = clamp01(s.speed / 2300);
+
+    const engine = startLoop('engineLoop');
+    if (engine) {
+      engine.src.playbackRate.setTargetAtTime(0.62 + 0.75 * k + (s.supersonic ? 0.08 : 0), t, 0.1);
+      engine.g.gain.setTargetAtTime(s.active ? 0.05 + 0.1 * k + 0.05 * Math.abs(s.throttle || 0) : 0, t, 0.12);
+    }
+
+    const useAlpha = !!(s.alpha && buffers.boostAlphaLoop);
     updateAlphaBoost(s.active && s.boosting && useAlpha, s.active, t);
-    boost.gain.gain.setTargetAtTime(s.active && s.boosting && !useAlpha ? 0.14 : 0, t, s.boosting ? 0.03 : 0.08);
-    boost.filter.frequency.setTargetAtTime(s.supersonic ? 2200 : 1400, t, 0.2);
-  }
-
-  function burst(opts) {
-    if (!ensure()) return;
-    const t = ctx.currentTime;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(opts.gain, t + (opts.attack || 0.005));
-    g.gain.exponentialRampToValueAtTime(0.0001, t + opts.decay);
-    const f = ctx.createBiquadFilter();
-    f.type = opts.filter || 'lowpass';
-    f.frequency.value = opts.freq;
-    if (opts.q) f.Q.value = opts.q;
-    const src = noiseSource(false);
-    src.connect(f); f.connect(g); g.connect(master);
-    src.start(t, Math.random());
-    src.stop(t + opts.decay + 0.05);
-  }
-
-  function tone(opts) {
-    if (!ensure()) return;
-    const t = ctx.currentTime + (opts.delay || 0);
-    const o = ctx.createOscillator();
-    o.type = opts.type || 'sine';
-    o.frequency.setValueAtTime(opts.from, t);
-    if (opts.to) o.frequency.exponentialRampToValueAtTime(opts.to, t + opts.decay);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(opts.gain, t + (opts.attack || 0.01));
-    g.gain.exponentialRampToValueAtTime(0.0001, t + opts.decay);
-    o.connect(g); g.connect(master);
-    o.start(t);
-    o.stop(t + opts.decay + 0.05);
+    const roar = startLoop('boostLoop');
+    if (roar) {
+      const on = s.active && s.boosting && !useAlpha;
+      roar.g.gain.setTargetAtTime(on ? 0.5 : 0, t, on ? 0.035 : 0.12);
+      roar.src.playbackRate.setTargetAtTime(s.supersonic ? 1.1 : 0.96 + 0.08 * k, t, 0.2);
+    }
   }
 
   return {
     unlock: ensure,
     setVolume,
+    setListener,
     update,
-    // Ball hit: a deep thump, a hollow metallic ring from the ball shell, and a bright crack on big hits
-    carBallHit(strength) {
-      const k = Math.min(strength / 3000, 1);
+    // Ball hit: a heavy body thump, plus the metal shell ringing on harder touches
+    carBallHit(strength, pos) {
+      const k = clamp01(strength / 3000);
       if (k < 0.02) return;
-      tone({ from: 170, to: 55, gain: 0.35 + k * 0.45, decay: 0.22, type: 'sine', attack: 0.003 });
-      tone({ from: 620 + k * 180, to: 540, gain: 0.08 + k * 0.12, decay: 0.35, type: 'triangle', attack: 0.002 });
-      tone({ from: 1240 + k * 300, to: 1100, gain: 0.03 + k * 0.05, decay: 0.25, type: 'sine', attack: 0.002 });
-      burst({ gain: 0.2 + k * 0.55, decay: 0.07 + k * 0.12, freq: 1800 + k * 3200, filter: 'bandpass', q: 0.9, attack: 0.002 });
-      if (k > 0.55) burst({ gain: 0.35 * k, decay: 0.05, freq: 5000, filter: 'highpass', attack: 0.001 });
+      play('ballHit', { gain: 0.35 + 0.65 * k, rate: 1.06 - 0.16 * k + rand(-0.04, 0.04), pos, ref: 900 });
+      if (k > 0.12) play('ballRing', { gain: 0.15 + 0.55 * k, rate: rand(0.94, 1.06), pos, ref: 900 });
     },
-    ballBounce(strength) {
-      const k = Math.min(strength / 2500, 1);
+    ballBounce(strength, pos) {
+      const k = clamp01(strength / 2500);
       if (k < 0.04) return;
-      burst({ gain: 0.05 + k * 0.35, decay: 0.08 + k * 0.12, freq: 500 + k * 1200 });
+      play('bounce', { gain: 0.12 + 0.6 * k, rate: rand(0.94, 1.08), pos, ref: 900 });
     },
-    carImpact(strength) {
-      const k = Math.min(strength / 1500, 1);
+    carImpact(strength, pos) {
+      const k = clamp01(strength / 1500);
       if (k < 0.1) return;
-      burst({ gain: 0.05 + k * 0.25, decay: 0.1 + k * 0.1, freq: 400 + k * 900 });
+      play('land', { gain: 0.12 + 0.5 * k, rate: rand(0.92, 1.05), pos, ref: 700 });
     },
-    // Jump (second = double jump): sample, or a suspension "chunk" plus a short air puff until it loads
-    jump(second) {
-      if (!ensure()) return;
-      if (playSample(second ? 'secondJump' : 'jump', 1)) return;
-      tone({ from: 95, to: 60, gain: 0.22, decay: 0.12, type: 'sine', attack: 0.002 });
-      burst({ gain: 0.12, decay: 0.14, freq: 900, filter: 'bandpass', q: 0.7, attack: 0.004 });
-      tone({ from: 300, to: 520, gain: 0.04, decay: 0.1, type: 'triangle' });
+    bump(strength, pos) {
+      const k = clamp01(strength / 2300);
+      play('bump', { gain: 0.3 + 0.6 * k, rate: rand(0.92, 1.04), pos, ref: 900 });
+      play('land', { gain: 0.2 + 0.4 * k, rate: 0.82, pos, ref: 900 });
     },
-    // Flip: the second-jump sound with a rising whoosh as the car spins
-    flip() {
-      if (!ensure()) return;
-      const sampled = playSample('secondJump', 1);
-      burst({ gain: sampled ? 0.08 : 0.16, decay: 0.32, freq: 1200, filter: 'bandpass', q: 1.2, attack: 0.03 });
-      if (!sampled) tone({ from: 180, to: 420, gain: 0.05, decay: 0.28, type: 'sawtooth', attack: 0.02 });
+    demolition(pos) { play('demo', { gain: 1, rate: rand(0.95, 1.03), pos, ref: 1600, rolloff: 0.6 }); },
+    sonicBoom() { play('sonicBoom', { gain: 0.4 }); },
+    jump(second) { play(second ? 'secondJump' : 'jump', { gain: 0.9 }); },
+    flip() { play('secondJump', { gain: 0.9 }); },
+    flipReset() { play('flipReset', { gain: 0.5 }); },
+    boostPickup(big) { play(big ? 'pickupBig' : 'pickupSmall', { gain: big ? 0.45 : 0.3, rate: rand(0.97, 1.03) }); },
+    // Goal: the explosion's own blast at the goal, then the crowd
+    goal(type, pos) {
+      play(GOAL_SOUND[type] || 'goalClassic', { gain: 1, pos, ref: 4000, rolloff: 0.4 });
+      play('cheer', { gain: type === 'partyTime' ? 0.8 : 0.55, delay: 0.2 });
+      if (type === 'partyTime') play('cheer', { gain: 0.45, delay: 1.1 });
     },
-    goal() {
-      if (!ensure()) return;
-      tone({ from: 90, to: 30, gain: 0.9, decay: 1.2, type: 'sine' });
-      burst({ gain: 0.9, decay: 1.6, freq: 1800, attack: 0.01 });
-      [0, 0.18, 0.36].forEach((d, i) => tone({ from: 392 * [1, 1.26, 1.5][i], gain: 0.12, decay: 0.9, delay: 0.25 + d, type: 'sawtooth' }));
-    },
-    // Flip reset: bright two-note chime with a sparkle on top
-    flipReset() {
-      tone({ from: 988, gain: 0.14, decay: 0.3, type: 'triangle', attack: 0.004 });
-      tone({ from: 1480, gain: 0.14, decay: 0.45, delay: 0.08, type: 'triangle', attack: 0.004 });
-      tone({ from: 2960, gain: 0.04, decay: 0.35, delay: 0.08, type: 'sine' });
-      burst({ gain: 0.05, decay: 0.2, freq: 7000, filter: 'highpass', attack: 0.01 });
-    },
-    sonicBoom() {
-      burst({ gain: 0.35, decay: 0.55, freq: 850, filter: 'bandpass', q: 0.5, attack: 0.02 });
-      tone({ from: 130, to: 45, gain: 0.25, decay: 0.45 });
-    },
-    countdown(go) { tone({ from: go ? 880 : 520, gain: 0.22, decay: go ? 0.55 : 0.25, type: 'square', attack: 0.005 }); },
-    whoosh() { burst({ gain: 0.18, decay: 0.45, freq: 700, filter: 'bandpass', q: 0.6, attack: 0.12 }); },
-    uiHover() { tone({ from: 1400, gain: 0.02, decay: 0.04, type: 'sine' }); },
-    uiSelect() { tone({ from: 900, to: 1300, gain: 0.05, decay: 0.08, type: 'triangle' }); }
+    pop(pos) { play('pop', { gain: 0.55, rate: rand(0.85, 1.2), pos, ref: 2500, rolloff: 0.5 }); },
+    firework(pos, generation) { play('fireworkPop', { gain: generation === 1 ? 0.75 : 0.35, rate: rand(0.85, 1.15), pos, ref: 3000, rolloff: 0.4 }); },
+    countdown(go) { play(go ? 'countGo' : 'countTick', { gain: 0.6 }); },
+    whoosh() { play('replayWhoosh', { gain: 0.5 }); },
+    uiHover() { play('uiHover', { gain: 0.22 }); },
+    uiSelect() { play('uiSelect', { gain: 0.38 }); }
   };
 })();
