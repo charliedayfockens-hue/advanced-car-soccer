@@ -485,7 +485,7 @@ Game.UI = (function () {
       img.alt = c.name;
       // Draw once the models are in, and again shortly after so late textures show up
       const draw = () => { if (!isGarageOpen()) return; try { img.src = menuOpts.renderCarThumbnail(c.id); } catch (e) { console.warn('Garage preview failed', e); } };
-      Game.View.onModels(() => { draw(); setTimeout(draw, 1500); });
+      Game.View.loadCar(c.id).then(() => { draw(); setTimeout(draw, 1500); setTimeout(draw, 4000); });
       b.append(img, el('div', 'garage-name', c.name), el('div', 'garage-desc', c.desc));
       b.addEventListener('click', () => {
         S.set('garage', 'car', c.id);
@@ -642,7 +642,7 @@ Game.UI = (function () {
   function renderMenuState() {
     const m = S.get('menu');
     document.querySelectorAll('.mm-card').forEach(c => c.classList.toggle('active', c.dataset.mode === m.mode));
-    const matchMode = m.mode === '1v1' || m.mode === '2v2';
+    const matchMode = m.mode === '1v1' || m.mode === '2v2' || m.mode === '3v3';
     $('mm-opponent-section').classList.toggle('collapsed', !matchMode);
     $('mm-freeplay-section').classList.toggle('collapsed', m.mode !== 'freeplay');
     // Only bots that play the chosen match mode are listed; keep a valid one selected
@@ -674,7 +674,7 @@ Game.UI = (function () {
         b.addEventListener('mouseenter', () => Game.Audio.uiHover());
         list.appendChild(b);
       };
-      opts.opponents.filter(o => o.modes.includes('1v1') || o.modes.includes('2v2')).forEach(o => addBot($('mm-opponents'), o, 'opponent'));
+      opts.opponents.filter(o => o.modes.some(md => md !== 'freeplay')).forEach(o => addBot($('mm-opponents'), o, 'opponent'));
       addBot($('mm-freeplay-bots'), { id: 'none', name: 'No bot', desc: 'Just you and the ball.' }, 'freeplayBot');
       opts.opponents.filter(o => o.modes.includes('freeplay')).forEach(o => addBot($('mm-freeplay-bots'), o, 'freeplayBot'));
       document.querySelectorAll('#mm-mirror-axis button').forEach(b => b.addEventListener('click', () => {

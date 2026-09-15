@@ -1,0 +1,22 @@
+Bots in Advanced Car Ball and where they come from
+
+Element - by Rangler (RLBotPack). Network weights in assets/bots/element.json.
+
+Necto and Nexto - by Rolv, Soren and contributors (github.com/Rolv-Arild/Necto, RLBotPack).
+  CC BY-NC-SA 4.0, see NECTO_NEXTO_LICENSE.txt. This is why the whole game is non-commercial.
+
+Botimus Prime and Bumblebee - by Darxeal (Bumblebee with Will), github.com/Darxeal/BotimusPrime, distributed in
+  RLBotPack (MIT License, Copyright (c) RLBot). Strategy and maneuver code ported to js/bots-botimus.js.
+  The original uses RLUtilities (samuelpmish/RLUtilities, GPL-3.0) for its low-level mechanics, ball and car
+  simulation; none of that code is included. js/bots-botimus-core.js has independent replacements.
+
+Indonesian Coconut - by SentientPlatypus, github.com/SentientPlatypus/indonesian_coconut.
+  Policy network from data/checkpoints/V3/17.9B (PPO_POLICY.pt), converted to float16 in coconut.bin.
+  The repository publishes no license, so all rights to the network stay with its author; it is included
+  here for this non-commercial fan project and will be removed on request.
+
+Opti - inspired by Kaiyotech's Opti (github.com/Kaiyotech/Opti, no license). Opti's trained models were never
+  published and none of its code is used: js/bots-opti.js is an original selector that switches between Nexto's
+  network and this game's own recovery and demo controllers.
+
+Rookie, Bowie Knife 99 and Mirror Bot - written for this game (Mirror Bot after Darxeal's mirror-bot idea).

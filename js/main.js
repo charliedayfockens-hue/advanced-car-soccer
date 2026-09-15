@@ -23,11 +23,13 @@
   const scene = new THREE.Scene();
   const world = new Game.World.World();
   Game.Input.init(canvas);
-  Game.View.loadModels();
+  Game.View.loadModels([S.get('garage').car]);
   Game.Bots.loadElement().catch(() => {}); // preload so 1v1 starts instantly; failures show on screen
 
   const ballView = new Game.View.BallView(scene, RL.BALL_COLLISION_RADIUS_SOCCAR);
   const ballArrow = new Game.View.BallArrow(scene);
+  const boostTimers = new Game.View.BoostTimers(scene, world.boostPads);
+  let bloomBase = 0.5;
   const effects = new Game.Effects.Effects(scene);
   effects.onPop = pos => Game.Audio.pop(pos);
   effects.onFirework = (pos, generation) => Game.Audio.firework(pos, generation);
@@ -82,11 +84,10 @@
     carPrev = world.cars.map(snap); carCurr = world.cars.map(snap); carDraw = world.cars.map(snap);
     carViews = world.cars.map((car, i) => {
       const paint = session.mode === 'freeplay' && i === 0 ? PAINT.freeplay : PAINT[car.team];
-      // The player drives the garage car; in matches the bots drive the other one
-      const garageCar = S.get('garage').car;
-      const otherCar = (Game.View.CARS.find(c => c.id !== garageCar) || Game.View.CARS[0]).id;
-      const carId = i === 0 || session.mode === 'freeplay' ? garageCar : otherCar;
+      // The player drives the garage car; bots drive a random car picked for each game
+      const carId = (i > 0 && session.carIds && session.carIds[i]) || S.get('garage').car;
       const v = new Game.View.CarView(scene, car, paint[0], paint[1], carId);
+      v.onModelApplied = () => applyEnv(v.group);
       v.setTheme(builtTheme || 'realistic');
       v.setShowHitbox(i === 0 && S.get('training').showHitbox);
       v.setBoostStyle(i === 0 ? S.get('graphics').boostStyle : 'standard');
@@ -110,7 +111,7 @@
       carViews.forEach(v => { v.setTheme(g.theme); applyEnv(v.group); });
       applyEnv(ballView.mesh);
       Game.View.onModels(() => applyEnv(ballView.mesh));
-      if (bloom) bloom.strength = g.theme === 'arcade' ? 0.3 : 0.5;
+      bloomBase = g.theme === 'arcade' ? 0.3 : 0.5;
     }
     stadium.setShowStadium(g.showStadium);
     if (carViews[0]) carViews[0].setBoostStyle(g.boostStyle);
@@ -171,11 +172,15 @@
     let teams;
     if (mode === '2v2') {
       teams = ['blue', 'blue', 'orange', 'orange'];
+    } else if (mode === '3v3') {
+      teams = ['blue', 'blue', 'blue', 'orange', 'orange', 'orange'];
     } else {
       const botTeam = session.opponent && (session.opponent.team ? session.opponent.team(session.botOptions) : 'orange');
       teams = botTeam ? ['blue', botTeam] : ['blue'];
     }
     world.setTeams(teams);
+    const carIds = Game.View.CARS.map(c => c.id);
+    session.carIds = teams.map((t, i) => (i === 0 ? S.get('garage').car : carIds[Math.floor(Math.random() * carIds.length)]));
     world.setBoostMode(isMatch ? 'standard' : S.get('training').boost);
     world.resetKickoff();
     buildCarViews();
@@ -184,7 +189,7 @@
     const oppName = session.opponent ? session.opponent.name.toUpperCase() : '';
     const playerName = (S.get('profile').name || '').trim().toUpperCase() || 'YOU';
     Game.UI.setMatchInfo(mode === '1v1' ? { blueName: playerName, orangeName: oppName, modeLabel: '1V1 MATCH' }
-      : mode === '2v2' ? { blueName: 'YOUR TEAM', orangeName: oppName, modeLabel: '2V2 MATCH' }
+      : mode === '2v2' || mode === '3v3' ? { blueName: 'YOUR TEAM', orangeName: oppName, modeLabel: mode.toUpperCase() + ' MATCH' }
         : { blueName: 'BLUE', orangeName: 'ORANGE', modeLabel: 'FREE PLAY' });
     Game.UI.hideMainMenu();
     Game.UI.hideEnd();
@@ -214,6 +219,7 @@
     session.mode = 'freeplay';
     session.bots = [];
     session.opponent = null;
+    session.carIds = null;
     Game.UI.showReplay(false);
     Game.UI.hideGoal();
     Game.UI.countdown(null);
@@ -619,7 +625,7 @@
     });
     ballView.update(ballDraw.pos, ballDraw.quat);
     ballArrow.update(dt, carDraw[0].pos, carDraw[0].quat, ballDraw.pos,
-      chase.ballCam && !inMenu && !inReplay && ballVisible && !!datas[0] && !datas[0].demoed);
+      !chase.ballCam && !inMenu && !inReplay && ballVisible && !!datas[0] && !datas[0].demoed);
 
     const me = datas[0] || { supersonic: false, boosting: false, speed: 0 };
     if (!paused && !inMenu && me.supersonic && !wasSupersonic) Game.Audio.sonicBoom();
@@ -635,6 +641,8 @@
 
     effects.update(frameDt);
     stadium.update(carDraw[0] ? carDraw[0].pos : new THREE.Vector3(), frameDt, world.boostMode === 'standard' ? world.boostPads : null);
+    boostTimers.update(world.boostPads, world.boostMode === 'standard' && !inMenu && !inReplay, chase.camera, now / 1000);
+    if (bloom) bloom.strength = bloomBase + (effects.bloomBoost || 0);
     ema('scene', performance.now() - t0);
 
     // ---------- camera ----------

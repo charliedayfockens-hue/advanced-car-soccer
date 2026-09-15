@@ -493,9 +493,9 @@ Game.BotsNecto = (function () {
   const list = Game.Bots.OPPONENTS;
   list.splice(list.findIndex(o => o.id === 'element') + 1, 0,
     { id: 'necto', name: 'Necto', desc: 'Champion-level challenger. Necto is the official RLGym community bot by Rolv, Soren and contributors, trained with reinforcement learning on workers run by players all over the world. Faster kickoffs, sharper touches and relentless pressure: expect every mistake to be punished.',
-      modes: ['1v1', '2v2'], make: (w, i) => new NectoBot(w, i), load: () => loadModel('necto') },
+      modes: ['1v1', '2v2', '3v3'], make: (w, i) => new NectoBot(w, i), load: () => loadModel('necto') },
     { id: 'nexto', name: 'Nexto', desc: 'Grand Champion-level challenger. Nexto is version 2 of Necto, the official RLGym community bot (Rolv, Soren and contributors). Wins 50/50s, reads your touches, takes to the air and turns almost any mistake into a goal.',
-      modes: ['1v1', '2v2'], make: (w, i) => new NextoBot(w, i), load: () => loadModel('nexto') });
+      modes: ['1v1', '2v2', '3v3'], make: (w, i) => new NextoBot(w, i), load: () => loadModel('nexto') });
 
   return { NectoBot, NextoBot, loadModel, NEXTO_ACTIONS, nectoForward, nextoForward };
 })();

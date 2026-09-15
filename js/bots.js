@@ -338,11 +338,13 @@ Game.Bots = (function () {
       this.name = 'Bowie Knife 99';
       this.controls = { throttle: 0, steer: 0, pitch: 0, yaw: 0, roll: 0, jump: false, boost: false, handbrake: false };
       this.jumpTimer = 0;
+      world.cars[carIndex].demoImmune = true; // it can't be demolished
     }
     get ready() { return true; }
     reset() { this.jumpTimer = 0; }
     tick() {
       const w = this.world, me = w.cars[this.index], c = this.controls;
+      me.state.boost = 100; // unlimited boost
       // Hunt the nearest car on the other team
       const target = w.cars.filter(car => car.team !== me.team && !car.isDemoed)
         .sort((a, b) => a.body.pos.sub(me.body.pos).length2() - b.body.pos.sub(me.body.pos).length2())[0];
@@ -383,6 +385,7 @@ Game.Bots = (function () {
       this.index = carIndex;
       this.name = 'Mirror Bot';
       this.axis = options && options.mirrorAxis === 'sides' ? 'sides' : 'midfield';
+      world.cars[carIndex].demoImmune = true; // it can't be demolished
       this.controls = { throttle: 0, steer: 0, pitch: 0, yaw: 0, roll: 0, jump: false, boost: false, handbrake: false };
     }
     get ready() { return true; }
@@ -417,11 +420,11 @@ Game.Bots = (function () {
 
   const OPPONENTS = [
     { id: 'element', name: 'Element', desc: 'Diamond-level challenger. A neural network by Rangler, trained with RLGym reinforcement learning (RLBotPack). Speed-flips kickoffs, shoots hard, challenges quickly and rotates back when beaten. A real test of your fundamentals.', modes: ['1v1'], make: (w, i) => new ElementBot(w, i), load: loadElement },
-    { id: 'bowie', name: 'Bowie Knife 99', desc: 'Bump and demo meme bot. It barely cares about the ball: it hunts you down, boosts to supersonic and tries to demolish you every chance it gets.', modes: ['1v1', '2v2'], make: (w, i) => new BowieKnifeBot(w, i), load: () => Promise.resolve() },
-    { id: 'rookie', name: 'Rookie', desc: 'Simple ball chaser. Good for warming up.', modes: ['1v1', '2v2'], make: (w, i) => new RookieBot(w, i), load: () => Promise.resolve() },
-    { id: 'mirror', name: 'Mirror Bot', desc: 'Free play only. Copies every move you make in mirror image, from the other half of the field or the other side of it.', modes: ['freeplay'],
+    { id: 'bowie', name: 'Bowie Knife 99', desc: 'Bump and demo meme bot with unlimited boost that can\'t be demolished. It barely cares about the ball: it hunts you down at supersonic and tries to demolish you every chance it gets.', modes: ['1v1', '2v2', '3v3'], make: (w, i) => new BowieKnifeBot(w, i), load: () => Promise.resolve() },
+    { id: 'rookie', name: 'Rookie', desc: 'Simple ball chaser. Good for warming up.', modes: ['1v1', '2v2', '3v3'], make: (w, i) => new RookieBot(w, i), load: () => Promise.resolve() },
+    { id: 'mirror', name: 'Mirror Bot', desc: 'Free play only. Copies every move you make in mirror image, from the other half of the field or the other side of it. It can\'t be demolished.', modes: ['freeplay'],
       team: opts => (opts && opts.mirrorAxis === 'sides' ? 'blue' : 'orange'), make: (w, i, opts) => new MirrorBot(w, i, opts), load: () => Promise.resolve() }
   ];
 
-  return { OPPONENTS, loadElement, ElementBot, RookieBot, BowieKnifeBot, MirrorBot };
+  return { OPPONENTS, loadElement, ElementBot, RookieBot, BowieKnifeBot, MirrorBot, Speedflip };
 })();
