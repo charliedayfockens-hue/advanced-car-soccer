@@ -416,7 +416,8 @@ Game.World = (function () {
         const hitWithBumper = points.some(p => s1.rot.tmulVec(p.sub(s1.pos)).x * BT > RL.BUMP_MIN_FORWARD_DIST);
         if (!hitWithBumper) continue;
 
-        const isDemo = c1.state.isSupersonic && c1.team !== c2.team;
+        // demoImmune: set by bots that can't be demolished (Mirror Bot, Bowie Knife 99); they still get bumped
+        const isDemo = c1.state.isSupersonic && c1.team !== c2.team && !c2.demoImmune;
         if (isDemo) {
           this.demolish(c2);
           this.events.push({ type: 'demo', attacker: a, victim: b });
