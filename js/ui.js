@@ -508,11 +508,38 @@ Game.UI = (function () {
       b.addEventListener('click', () => {
         S.set('garage', 'explosion', x.id);
         boom.querySelectorAll('.garage-explosion').forEach(y => y.classList.toggle('active', y.dataset.id === x.id));
+        drawPaints();
         Game.Audio.uiSelect();
       });
       b.addEventListener('mouseenter', () => Game.Audio.uiHover());
       boom.appendChild(b);
     });
+
+    // Colour swatches for the selected goal explosion (each explosion remembers its own colour)
+    function drawPaints() {
+      const g = S.get('garage');
+      const x = Game.Effects.EXPLOSIONS.find(e => e.id === g.explosion) || Game.Effects.EXPLOSIONS[0];
+      const current = (g.explosionPaints || {})[x.id] || 'unpainted';
+      const paints = Game.Effects.PAINTS;
+      $('garage-paint-label').textContent = x.name + ' Colour';
+      $('garage-paint-name').textContent = (paints.find(p => p.id === current) || paints[0]).name;
+      const wrap = $('garage-paints');
+      wrap.innerHTML = '';
+      paints.forEach(p => {
+        const s = el('button', 'garage-paint' + (p.id === current ? ' active' : '') + (p.hex === null ? ' unpainted' : ''));
+        s.title = p.name;
+        s.setAttribute('aria-label', p.name);
+        if (p.hex !== null) s.style.background = '#' + p.hex.toString(16).padStart(6, '0');
+        s.addEventListener('click', () => {
+          S.set('garage', 'explosionPaints', Object.assign({}, S.get('garage').explosionPaints, { [x.id]: p.id }));
+          drawPaints();
+          Game.Audio.uiSelect();
+        });
+        s.addEventListener('mouseenter', () => Game.Audio.uiHover());
+        wrap.appendChild(s);
+      });
+    }
+    drawPaints();
 
     // Player name (shown on the scoreboard and to others)
     const nameInput = $('garage-name-input');

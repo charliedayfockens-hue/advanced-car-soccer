@@ -39,7 +39,7 @@ Game.Settings = (function () {
     controls: { device: 'auto', deadzone: 0.12, steerAxis: 0, invertSteer: false, pitchAxis: 1, invertPitch: false, triggerThreshold: 0.15, bindings: DEFAULT_BINDINGS },
     graphics: { theme: 'realistic', limitFps: false, maxFps: 120, showStadium: true, boostStyle: 'alpha' },
     menu: { mode: 'freeplay', opponent: 'element', freeplayBot: 'none', mirrorAxis: 'midfield' },
-    garage: { car: 'surbabu', explosion: 'classic' },
+    garage: { car: 'surbabu', explosion: 'classic', explosionPaints: {} },
     profile: { name: '' },
     audio: { volume: 60 },
     training: { disableGoalReset: false, boost: 'unlimited', showHitbox: false },

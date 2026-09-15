@@ -260,8 +260,9 @@ Game.ChaseCamera = (function () {
     }
 
     // Replay director: chase shot behind the car looking at the ball, cutting to a wide shot
-    // beside the goal for the final moments. timeToGoal < 0 after the goal.
-    updateReplay(dt, carPos, ballPos, goalPos, timeToGoal, shake) {
+    // beside the goal for the final moments, then turning to watch the goal explosion once the ball goes in.
+    // timeToGoal < 0 after the goal. explosionPos: where the ball crossed the line.
+    updateReplay(dt, carPos, ballPos, goalPos, timeToGoal, shake, explosionPos) {
       let pos, look;
       if (timeToGoal > 1.4) {
         const dir = new THREE.Vector3(ballPos.x - carPos.x, 0, ballPos.z - carPos.z);
@@ -270,10 +271,13 @@ Game.ChaseCamera = (function () {
         pos = new THREE.Vector3(carPos.x - dir.x * 520, carPos.y + 230, carPos.z - dir.z * 520);
         look = ballPos.clone().lerp(carPos, 0.25);
       } else {
-        const side = ballPos.x >= 0 ? 1 : -1;
+        // Pick the side from where the ball goes in, so the shot doesn't flip sides mid-way
+        const side = (explosionPos || ballPos).x >= 0 ? 1 : -1;
         const toField = -Math.sign(goalPos.z);
         pos = new THREE.Vector3(side * 2300, 950, goalPos.z + toField * 1900);
-        look = ballPos.clone();
+        // After the goal the ball is hidden, so look at the explosion in the goal instead
+        look = timeToGoal > 0 || !explosionPos ? ballPos.clone()
+          : new THREE.Vector3(explosionPos.x, Math.max(explosionPos.y, 100) + 250, explosionPos.z);
       }
       const cut = !this.replayPos || this.replayPos.distanceTo(pos) > 2500;
       if (cut) {
