@@ -237,8 +237,9 @@
     stadium.setScore(score.blue, score.orange);
     const pos = toThreePos(world.ball.pos);
     const explosion = scorerExplosion(team);
-    effects.goalExplosion(pos, TEAM_COLOR[team], explosion);
-    Game.Audio.goal(explosion, pos);
+    effects.goalExplosion(pos, TEAM_COLOR[team], explosion.type, explosion.paint);
+    Game.Audio.goal(explosion.type, pos);
+    launchCars();
     Game.UI.showGoal(team);
 
     if (session.mode === 'freeplay' && S.get('training').disableGoalReset) {
@@ -259,7 +260,30 @@
     world.cars.forEach((car, i) => {
       if (car.team === team && car.lastBallTouchTick !== undefined && car.lastBallTouchTick > bestTick) { best = i; bestTick = car.lastBallTouchTick; }
     });
-    return best === 0 ? S.get('garage').explosion : 'classic';
+    if (best !== 0) return { type: 'classic', paint: null };
+    const g = S.get('garage');
+    const paint = Game.Effects.PAINTS.find(p => p.id === (g.explosionPaints || {})[g.explosion]);
+    return { type: g.explosion, paint: paint ? paint.hex : null };
+  }
+
+  // The goal explosion blasts every car near the ball away from it, like Rocket League: the closer the car,
+  // the harder it's thrown back and up, with a tumble. The sim clamps the result to max car speed.
+  function launchCars() {
+    const U = RL.UU_TO_BT, V = Game.Math.Vec3, ball = world.ball.pos, RADIUS = 3000;
+    world.cars.forEach(car => {
+      if (car.isDemoed) return;
+      const d = car.body.pos.sub(ball);
+      const dist = d.length() * BT;
+      if (dist > RADIUS) return;
+      const k = 1 - dist / RADIUS;
+      const flat = Math.hypot(d.x, d.y);
+      const out = flat > 1e-3 ? new V(d.x / flat, d.y / flat, 0) : new V(0, -Math.sign(ball.y) || 1, 0);
+      car.body.linVel = car.body.linVel.mul(0.15)
+        .add(out.mul((700 + 1600 * k) * U))
+        .add(new V(0, 0, (350 + 900 * k) * U));
+      const spin = 2 + 4 * k;
+      car.body.angVel = new V((Math.random() - 0.5) * spin, (Math.random() - 0.5) * spin, (Math.random() - 0.5) * spin);
+    });
   }
 
   // Ball cam is unavailable from a goal until the next kickoff, when the player's choice comes back.
@@ -274,7 +298,7 @@
   }
 
   function startReplay() {
-    const clip = recorder.freeze(goal.time - 5.5, goal.time + 1.3);
+    const clip = recorder.freeze(goal.time - 5.5, goal.time + 2.4);
     Game.UI.hideGoal();
     if (clip.frames.length < 20) return afterReplay();
     replay = { clip, t: clip.startTime, goalTime: goal.time, team: goal.team, exploded: false, pos: goal.pos, explosion: goal.explosion };
@@ -513,8 +537,8 @@
         r.t += dt * (nearGoal ? 0.35 : 1);
         if (!r.exploded && r.t >= r.goalTime) {
           r.exploded = true;
-          effects.goalExplosion(r.pos, TEAM_COLOR[r.team], r.explosion);
-          Game.Audio.goal(r.explosion, r.pos);
+          effects.goalExplosion(r.pos, TEAM_COLOR[r.team], r.explosion.type, r.explosion.paint);
+          Game.Audio.goal(r.explosion.type, r.pos);
         }
         Game.UI.setReplayProgress((r.t - r.clip.startTime) / (r.clip.endTime - r.clip.startTime));
         if (r.t >= r.clip.endTime || (I.wasPressed('jump') && r.t - r.clip.startTime > 0.3)) afterReplay();
@@ -625,7 +649,7 @@
       if (chase.camera.fov !== 75) chase.applyFov(75);
     } else if (inReplay) {
       const goalPos = new THREE.Vector3(0, 320, replay.team === 'blue' ? 5120 : -5120);
-      chase.updateReplay(dt, carDraw[0].pos, ballDraw.pos, goalPos, replay.goalTime - replay.t, shake);
+      chase.updateReplay(dt, carDraw[0].pos, ballDraw.pos, goalPos, replay.goalTime - replay.t, shake, replay.pos);
     } else {
       chase.update(dt, carDraw[0].pos, carDraw[0].quat, me.speed, ballDraw.pos, paused ? null : I, shake,
         { onGround: world.car.state.isOnGround, groundNormal: wheelGroundNormal(world.car),
