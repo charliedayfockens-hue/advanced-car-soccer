@@ -1,11 +1,33 @@
-// All game audio is synthesized with WebAudio (no sound files): boost, impacts, jumps/flips,
-// goal explosion, countdown and UI ticks. No ambient loops. One master level from Settings > Audio.
+// Game audio. Most sounds are synthesized with WebAudio (impacts, flips, goal explosion, countdown, UI
+// ticks, standard boost). Sample files cover the alpha boost (start, loop, release) and the first and
+// second jump; the synthesized versions play until those have loaded. One master level from Settings > Audio.
 window.Game = window.Game || {};
 
 Game.Audio = (function () {
   let ctx = null, master = null, noiseBuf = null;
-  let boost = null;
+  let boost = null, alphaBoost = null;
   let volume = 0.6;
+
+  const SAMPLES = {
+    boostStart: 'assets/audio/boost_alpha_1.mp3',
+    boostEnd: 'assets/audio/boost_alpha_2.mp3',
+    boostLoop: 'assets/audio/boost_alpha_3.mp3',
+    jump: 'assets/audio/jump.mp3',
+    secondJump: 'assets/audio/second_jump.mp3'
+  };
+  const buffers = {};
+  let samplesRequested = false;
+
+  function loadSamples() {
+    if (samplesRequested) return;
+    samplesRequested = true;
+    Object.entries(SAMPLES).forEach(([key, url]) => {
+      Game.Assets.fetchChecked(url, { kind: 'MP3', check: Game.Assets.isMp3 })
+        .then(buf => ctx.decodeAudioData(buf))
+        .then(audio => { buffers[key] = audio; })
+        .catch(err => Game.Assets.report(err, url));
+    });
+  }
 
   function makeNoise() {
     const len = ctx.sampleRate * 2;
@@ -34,13 +56,13 @@ Game.Audio = (function () {
     comp.connect(ctx.destination);
     noiseBuf = makeNoise();
 
-    // Boost: airy filtered noise, only audible while boosting. There is deliberately no engine/rumble
-    // or high shimmer layer.
+    // Standard boost: airy filtered noise, only audible while boosting
     const bGain = ctx.createGain(); bGain.gain.value = 0;
     const bFilter = ctx.createBiquadFilter(); bFilter.type = 'bandpass'; bFilter.frequency.value = 1400; bFilter.Q.value = 0.7;
     const bSrc = noiseSource(true);
     bSrc.connect(bFilter); bFilter.connect(bGain); bGain.connect(master); bSrc.start();
     boost = { gain: bGain, filter: bFilter };
+    loadSamples();
     return true;
   }
 
@@ -49,11 +71,52 @@ Game.Audio = (function () {
     if (master) master.gain.setTargetAtTime(volume, ctx.currentTime, 0.03);
   }
 
+  // Plays a loaded sample once; returns null if it hasn't loaded
+  function playSample(key, gain) {
+    const buffer = buffers[key];
+    if (!buffer || !ctx) return null;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    src.connect(g); g.connect(master);
+    src.start();
+    return { src, g };
+  }
+
+  // Alpha boost: ignition one-shot, then the loop fades in; letting go fades the loop and plays the release
+  function updateAlphaBoost(on, active, t) {
+    if (on && !alphaBoost) {
+      const start = playSample('boostStart', 0.9);
+      const loopGain = ctx.createGain();
+      loopGain.gain.setValueAtTime(0, t);
+      loopGain.gain.setTargetAtTime(0.75, t + 0.12, 0.08);
+      const loop = ctx.createBufferSource();
+      loop.buffer = buffers.boostLoop;
+      loop.loop = true;
+      loop.connect(loopGain); loopGain.connect(master);
+      loop.start(t);
+      alphaBoost = { start, loop, loopGain };
+    } else if (!on && alphaBoost) {
+      alphaBoost.loopGain.gain.setTargetAtTime(0, t, 0.04);
+      alphaBoost.loop.stop(t + 0.3);
+      if (alphaBoost.start) {
+        alphaBoost.start.g.gain.setTargetAtTime(0, t, 0.05);
+        alphaBoost.start.src.stop(t + 0.3);
+      }
+      if (active) playSample('boostEnd', 0.8);
+      alphaBoost = null;
+    }
+  }
+
   function update(s) {
     if (!ctx || ctx.state !== 'running') return;
     const t = ctx.currentTime;
-    boost.gain.gain.setTargetAtTime(s.active && s.boosting ? 0.14 : 0, t, s.boosting ? 0.03 : 0.08);
-    boost.filter.frequency.setTargetAtTime(s.supersonic ? 2200 : 1400, t, 0.2);  }
+    const useAlpha = !!(s.alpha && buffers.boostLoop);
+    updateAlphaBoost(s.active && s.boosting && useAlpha, s.active, t);
+    boost.gain.gain.setTargetAtTime(s.active && s.boosting && !useAlpha ? 0.14 : 0, t, s.boosting ? 0.03 : 0.08);
+    boost.filter.frequency.setTargetAtTime(s.supersonic ? 2200 : 1400, t, 0.2);
+  }
 
   function burst(opts) {
     if (!ensure()) return;
@@ -112,16 +175,20 @@ Game.Audio = (function () {
       if (k < 0.1) return;
       burst({ gain: 0.05 + k * 0.25, decay: 0.1 + k * 0.1, freq: 400 + k * 900 });
     },
-    // Jump: suspension "chunk" plus a short air puff
-    jump() {
+    // Jump (second = double jump): sample, or a suspension "chunk" plus a short air puff until it loads
+    jump(second) {
+      if (!ensure()) return;
+      if (playSample(second ? 'secondJump' : 'jump', 1)) return;
       tone({ from: 95, to: 60, gain: 0.22, decay: 0.12, type: 'sine', attack: 0.002 });
       burst({ gain: 0.12, decay: 0.14, freq: 900, filter: 'bandpass', q: 0.7, attack: 0.004 });
       tone({ from: 300, to: 520, gain: 0.04, decay: 0.1, type: 'triangle' });
     },
-    // Flip: rising whoosh as the car spins
+    // Flip: the second-jump sound with a rising whoosh as the car spins
     flip() {
-      burst({ gain: 0.16, decay: 0.32, freq: 1200, filter: 'bandpass', q: 1.2, attack: 0.03 });
-      tone({ from: 180, to: 420, gain: 0.05, decay: 0.28, type: 'sawtooth', attack: 0.02 });
+      if (!ensure()) return;
+      const sampled = playSample('secondJump', 1);
+      burst({ gain: sampled ? 0.08 : 0.16, decay: 0.32, freq: 1200, filter: 'bandpass', q: 1.2, attack: 0.03 });
+      if (!sampled) tone({ from: 180, to: 420, gain: 0.05, decay: 0.28, type: 'sawtooth', attack: 0.02 });
     },
     goal() {
       if (!ensure()) return;

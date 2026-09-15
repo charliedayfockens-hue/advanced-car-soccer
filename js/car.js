@@ -546,7 +546,7 @@ Game.CarSim = (function () {
             } else {
               b.applyCentralImpulse(this.up().mul(RL.JUMP_IMMEDIATE_FORCE * U * RL.CAR_MASS_BT));
               s.hasDoubleJumped = true;
-              this.events.push({ type: 'jump' });
+              this.events.push({ type: 'jump', second: true });
             }
           }
         }

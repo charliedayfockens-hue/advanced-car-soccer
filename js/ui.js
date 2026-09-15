@@ -469,14 +469,36 @@ Game.UI = (function () {
     }
     $('fi-arc').style.strokeDashoffset = 194.8 * (1 - Math.max(0, Math.min(1, frac)));
   }
-  function flipResetPopup() {
-    const p = $('flip-popup');
-    p.classList.remove('hidden');
-    restartAnim(p.querySelector('span'));
-    clearTimeout(flipTimer);
-    flipTimer = setTimeout(() => p.classList.add('hidden'), 1250);
-  }
   function setSupersonic(on) { document.body.classList.toggle('supersonic', on); }
+
+  // ---------------- garage ----------------
+  const isGarageOpen = () => !$('garage-modal').classList.contains('hidden');
+
+  function openGarage() {
+    const list = $('garage-cars');
+    list.innerHTML = '';
+    const current = S.get('garage').car;
+    (menuOpts.cars || []).forEach(c => {
+      const b = el('button', 'garage-car' + (c.id === current ? ' active' : ''));
+      b.dataset.id = c.id;
+      const img = el('img', 'garage-thumb');
+      img.alt = c.name;
+      // Draw once the models are in, and again shortly after so late textures show up
+      const draw = () => { if (!isGarageOpen()) return; try { img.src = menuOpts.renderCarThumbnail(c.id); } catch (e) { console.warn('Garage preview failed', e); } };
+      Game.View.onModels(() => { draw(); setTimeout(draw, 1500); });
+      b.append(img, el('div', 'garage-name', c.name), el('div', 'garage-desc', c.desc));
+      b.addEventListener('click', () => {
+        S.set('garage', 'car', c.id);
+        list.querySelectorAll('.garage-car').forEach(x => x.classList.toggle('active', x.dataset.id === c.id));
+        Game.Audio.uiSelect();
+      });
+      b.addEventListener('mouseenter', () => Game.Audio.uiHover());
+      list.appendChild(b);
+    });
+    $('garage-modal').classList.remove('hidden');
+  }
+
+  function closeGarage() { $('garage-modal').classList.add('hidden'); }
 
   // ---------------- status readout ----------------
   function pct(sorted, p) { return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] : 0; }
@@ -570,9 +592,15 @@ Game.UI = (function () {
   function renderMenuState() {
     const m = S.get('menu');
     document.querySelectorAll('.mm-card').forEach(c => c.classList.toggle('active', c.dataset.mode === m.mode));
-    $('mm-opponent-section').classList.toggle('collapsed', m.mode !== '1v1');
+    const matchMode = m.mode === '1v1' || m.mode === '2v2';
+    $('mm-opponent-section').classList.toggle('collapsed', !matchMode);
     $('mm-freeplay-section').classList.toggle('collapsed', m.mode !== 'freeplay');
-    document.querySelectorAll('#mm-opponents .mm-opp').forEach(o => o.classList.toggle('active', o.dataset.id === m.opponent));
+    // Only bots that play the chosen match mode are listed; keep a valid one selected
+    const opps = [...document.querySelectorAll('#mm-opponents .mm-opp')];
+    opps.forEach(o => { o.hidden = matchMode && !o.dataset.modes.split(' ').includes(m.mode); });
+    const shown = opps.filter(o => !o.hidden);
+    if (matchMode && shown.length && !shown.some(o => o.dataset.id === m.opponent)) S.set('menu', 'opponent', shown[0].dataset.id);
+    opps.forEach(o => o.classList.toggle('active', o.dataset.id === S.get('menu').opponent));
     document.querySelectorAll('#mm-freeplay-bots .mm-opp').forEach(o => o.classList.toggle('active', o.dataset.id === m.freeplayBot));
     $('mm-mirror-axis').classList.toggle('hidden', m.freeplayBot !== 'mirror');
     document.querySelectorAll('#mm-mirror-axis button').forEach(b => b.classList.toggle('active', b.dataset.axis === m.mirrorAxis));
@@ -587,6 +615,7 @@ Game.UI = (function () {
       const addBot = (list, o, settingKey) => {
         const b = el('button', 'mm-opp');
         b.dataset.id = o.id;
+        b.dataset.modes = (o.modes || []).join(' ');
         const av = el('div', 'mm-opp-avatar ' + o.id, o.name[0]);
         const text = el('div');
         text.append(el('div', 'mm-opp-name', o.name), el('div', 'mm-opp-desc', o.desc));
@@ -595,7 +624,7 @@ Game.UI = (function () {
         b.addEventListener('mouseenter', () => Game.Audio.uiHover());
         list.appendChild(b);
       };
-      opts.opponents.filter(o => o.modes.includes('1v1')).forEach(o => addBot($('mm-opponents'), o, 'opponent'));
+      opts.opponents.filter(o => o.modes.includes('1v1') || o.modes.includes('2v2')).forEach(o => addBot($('mm-opponents'), o, 'opponent'));
       addBot($('mm-freeplay-bots'), { id: 'none', name: 'No bot', desc: 'Just you and the ball.' }, 'freeplayBot');
       opts.opponents.filter(o => o.modes.includes('freeplay')).forEach(o => addBot($('mm-freeplay-bots'), o, 'freeplayBot'));
       document.querySelectorAll('#mm-mirror-axis button').forEach(b => b.addEventListener('click', () => {
@@ -609,10 +638,15 @@ Game.UI = (function () {
         S.set('graphics', 'boostStyle', b.dataset.boost); renderMenuState(); Game.Audio.uiSelect();
       }));
       $('mm-settings').addEventListener('click', () => openSettings());
+      $('mm-garage').addEventListener('click', () => { openGarage(); Game.Audio.uiSelect(); });
+      $('garage-close').addEventListener('click', closeGarage);
+      $('garage-done').addEventListener('click', closeGarage);
+      $('garage-modal').addEventListener('click', e => { if (e.target === $('garage-modal')) closeGarage(); });
+      document.addEventListener('keydown', e => { if (e.code === 'Escape' && isGarageOpen()) { e.preventDefault(); closeGarage(); } });
       $('mm-play').addEventListener('click', () => {
         Game.Audio.unlock();
         const m = S.get('menu');
-        menuOpts.onStart(m.mode, m.mode === '1v1' ? m.opponent : m.freeplayBot);
+        menuOpts.onStart(m.mode, m.mode === 'freeplay' ? m.freeplayBot : m.opponent);
       });
     }
     renderMenuState();
@@ -654,7 +688,7 @@ Game.UI = (function () {
   return {
     init, hideLoading, isMenuOpen, openSettings, closeSettings, menuUpdate,
     updateHud, setCam, setScore, showGoal, hideGoal, showReplay, setReplayProgress, countdown, toast, fadeHint, drawStatus,
-    setFlip, flipResetPopup, setSupersonic,
+    setFlip, setSupersonic,
     showMainMenu, hideMainMenu, isMainMenuOpen, setMatchInfo, showEnd, hideEnd
   };
 })();

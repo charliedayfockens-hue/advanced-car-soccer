@@ -5,7 +5,10 @@
   const S = Game.Settings, RL = Game.RL, BT = RL.BT_TO_UU;
   const { toThreePos, toThreeQuat } = Game.View;
   const TEAM_COLOR = { blue: 0x2f7dff, orange: 0xff7a1a };
-  const PAINT = { freeplay: [0xff7f1f, 0xff2fb3], blue: [0x2a6cff, 0x5fe3ff], orange: [0xff7a1a, 0xffd23f] };
+  // [body, accent]: the accent (wing, skirts, trim) is a lighter shade of the body colour
+  const lighter = hex => new THREE.Color(hex).offsetHSL(0, -0.08, 0.2).getHex();
+  const paintOf = hex => [hex, lighter(hex)];
+  const PAINT = { freeplay: paintOf(0xff7f1f), blue: paintOf(0x2a6cff), orange: paintOf(0xff7a1a) };
   const MATCH_SECONDS = 300;
 
   const canvas = document.getElementById('game-canvas');
@@ -24,12 +27,13 @@
   Game.Bots.loadElement().catch(() => {}); // preload so 1v1 starts instantly; failures show on screen
 
   const ballView = new Game.View.BallView(scene, RL.BALL_COLLISION_RADIUS_SOCCAR);
+  const ballArrow = new Game.View.BallArrow(scene);
   const effects = new Game.Effects.Effects(scene);
   const chase = new Game.ChaseCamera.ChaseCamera(window.innerWidth / Math.max(window.innerHeight, 1));
   const recorder = new Game.Replay.Recorder(9);
 
   const score = { blue: 0, orange: 0 };
-  const session = { mode: 'freeplay', opponent: null, bot: null, clock: 0, overtime: false, matchOver: false };
+  const session = { mode: 'freeplay', opponent: null, bots: [], clock: 0, overtime: false, matchOver: false };
   let stadium = null, builtTheme = null;
   let carViews = [];
 
@@ -75,7 +79,11 @@
     carPrev = world.cars.map(snap); carCurr = world.cars.map(snap); carDraw = world.cars.map(snap);
     carViews = world.cars.map((car, i) => {
       const paint = session.mode === 'freeplay' && i === 0 ? PAINT.freeplay : PAINT[car.team];
-      const v = new Game.View.CarView(scene, car, paint[0], paint[1]);
+      // The player drives the garage car; in matches the bots drive the other one
+      const garageCar = S.get('garage').car;
+      const otherCar = (Game.View.CARS.find(c => c.id !== garageCar) || Game.View.CARS[0]).id;
+      const carId = i === 0 || session.mode === 'freeplay' ? garageCar : otherCar;
+      const v = new Game.View.CarView(scene, car, paint[0], paint[1], carId);
       v.setTheme(builtTheme || 'realistic');
       v.setShowHitbox(i === 0 && S.get('training').showHitbox);
       v.setBoostStyle(i === 0 ? S.get('graphics').boostStyle : 'standard');
@@ -127,6 +135,8 @@
   let goalLatch = false, debugFreeze = false;
   let flipResetFlag = false, wasSupersonic = false, speedAmount = 0;
 
+  S.on('garage', () => { if (carViews.length) buildCarViews(); });
+
   const fmtClock = s => { const t = Math.max(0, Math.ceil(s - 1e-6)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
 
   function setScoreboard() {
@@ -141,38 +151,48 @@
     b.angVel = new Game.Math.Vec3();
   }
 
-  // opponentId: the 1v1 opponent, or the free play bot ('none' for no bot)
+  // mode: 'freeplay', '1v1' or '2v2'. opponentId: the match bot (in 2v2 it also drives your teammate), or
+  // the free play bot ('none' for no bot)
   async function startSession(mode, opponentId) {
+    const isMatch = mode !== 'freeplay';
     const forMode = Game.Bots.OPPONENTS.filter(o => o.modes.includes(mode));
     session.mode = mode;
-    session.opponent = forMode.find(o => o.id === opponentId) || (mode === '1v1' ? forMode[0] : null);
+    session.opponent = forMode.find(o => o.id === opponentId) || (isMatch ? forMode[0] : null);
     session.botOptions = { mirrorAxis: S.get('menu').mirrorAxis };
     session.overtime = false;
     session.matchOver = false;
-    session.clock = mode === '1v1' ? MATCH_SECONDS : 0;
-    const botTeam = session.opponent && (session.opponent.team ? session.opponent.team(session.botOptions) : 'orange');
-    world.setTeams(botTeam ? ['blue', botTeam] : ['blue']);
-    world.setBoostMode(mode === '1v1' ? 'standard' : S.get('training').boost);
+    session.clock = isMatch ? MATCH_SECONDS : 0;
+    let teams;
+    if (mode === '2v2') {
+      teams = ['blue', 'blue', 'orange', 'orange'];
+    } else {
+      const botTeam = session.opponent && (session.opponent.team ? session.opponent.team(session.botOptions) : 'orange');
+      teams = botTeam ? ['blue', botTeam] : ['blue'];
+    }
+    world.setTeams(teams);
+    world.setBoostMode(isMatch ? 'standard' : S.get('training').boost);
     world.resetKickoff();
     buildCarViews();
     score.blue = score.orange = 0;
     setScoreboard();
-    Game.UI.setMatchInfo(mode === '1v1'
-      ? { blueName: 'YOU', orangeName: session.opponent.name.toUpperCase(), modeLabel: '1V1 MATCH' }
-      : { blueName: 'BLUE', orangeName: 'ORANGE', modeLabel: 'FREE PLAY' });
+    const oppName = session.opponent ? session.opponent.name.toUpperCase() : '';
+    Game.UI.setMatchInfo(mode === '1v1' ? { blueName: 'YOU', orangeName: oppName, modeLabel: '1V1 MATCH' }
+      : mode === '2v2' ? { blueName: 'YOUR TEAM', orangeName: oppName, modeLabel: '2V2 MATCH' }
+        : { blueName: 'BLUE', orangeName: 'ORANGE', modeLabel: 'FREE PLAY' });
     Game.UI.hideMainMenu();
     Game.UI.hideEnd();
-    session.bot = null;
+    session.bots = [];
     state = 'loading';
     if (session.opponent) {
+      const makeAll = opp => teams.slice(1).map((_, k) => opp.make(world, k + 1, session.botOptions));
       try {
         await session.opponent.load();
-        session.bot = session.opponent.make(world, 1, session.botOptions);
+        session.bots = makeAll(session.opponent);
       } catch (e) {
         console.warn(e);
-        if (mode === '1v1') {
+        if (isMatch) {
           Game.UI.toast(session.opponent.name + " couldn't load (see bottom-left), playing Rookie instead");
-          session.bot = Game.Bots.OPPONENTS.find(o => o.id === 'rookie').make(world, 1);
+          session.bots = makeAll(Game.Bots.OPPONENTS.find(o => o.id === 'rookie'));
         } else {
           Game.UI.toast(session.opponent.name + " couldn't load (see bottom-left)");
         }
@@ -185,7 +205,7 @@
   function goToMenu() {
     state = 'menu';
     session.mode = 'freeplay';
-    session.bot = null;
+    session.bots = [];
     session.opponent = null;
     Game.UI.showReplay(false);
     Game.UI.hideGoal();
@@ -198,7 +218,10 @@
     ballView.setVisible(true);
     chase.reset();
     Game.Input.exitPointerLock();
-    Game.UI.showMainMenu({ opponents: Game.Bots.OPPONENTS, onStart: startSession });
+    Game.UI.showMainMenu({
+      opponents: Game.Bots.OPPONENTS, onStart: startSession, cars: Game.View.CARS,
+      renderCarThumbnail: id => Game.View.renderThumbnail(renderer, id, 640, 360, PAINT.freeplay)
+    });
   }
 
   function onGoal(team) {
@@ -214,7 +237,7 @@
       setTimeout(() => Game.UI.hideGoal(), 1600);
       return;
     }
-    if (session.mode === '1v1' && session.overtime) session.matchOver = true;
+    if (session.mode !== 'freeplay' && session.overtime) session.matchOver = true;
     state = 'goal';
     goal = { team, time: simTime, pos, t: 0 };
     lockBallCam(true);
@@ -260,7 +283,7 @@
     replay = null;
     goal = null;
     flipResetFlag = false;
-    if (session.bot) session.bot.reset();
+    session.bots.forEach(b => b.reset());
   }
 
   function startKickoff() {
@@ -287,14 +310,14 @@
       blue: score.blue,
       orange: score.orange,
       sub: (session.overtime ? 'Won in overtime' : 'Full time') + ' · vs ' + session.opponent.name,
-      onAgain: () => startSession('1v1', session.opponent.id),
+      onAgain: () => startSession(session.mode, session.opponent.id),
       onMenu: goToMenu
     });
     if (win) Game.Audio.goal();
   }
 
   function updateMatchClock(dt) {
-    if (session.mode !== '1v1') { session.clock += dt; return; }
+    if (session.mode === 'freeplay') { session.clock += dt; return; }
     if (world.kickoffPause) return; // clock waits for the kickoff touch, like RL
     if (session.overtime) { session.clock += dt; return; }
     session.clock -= dt;
@@ -312,7 +335,7 @@
   }
 
   function clockText() {
-    if (session.mode === '1v1' && session.overtime) return '+' + fmtClock(session.clock);
+    if (session.mode !== 'freeplay' && session.overtime) return '+' + fmtClock(session.clock);
     return fmtClock(session.clock);
   }
 
@@ -338,15 +361,19 @@
           if (e.victim === 0) Game.UI.toast('DEMOLISHED');
           break;
         }
-        case 'jump': if (e.car === 0) Game.Audio.jump(); break;
+        case 'jump': if (e.car === 0) Game.Audio.jump(e.second); break;
         case 'flip': if (e.car === 0) { Game.Audio.flip(); flipResetFlag = false; } break;
         case 'flipReset':
           if (e.car === 0) {
             flipResetFlag = true;
-            Game.UI.flipResetPopup();
             Game.Audio.flipReset();
           }
-          if (car) effects.flipReset(toThreePos(car.body.pos));
+          if (car) {
+            // Ring on the underside of the ball, where the wheels touched it
+            const up = new THREE.Vector3(0, 1, 0).applyQuaternion(toThreeQuat(car.body.rot));
+            effects.flipResetRing(toThreePos(world.ball.pos).addScaledVector(up, -(RL.BALL_COLLISION_RADIUS_SOCCAR + 2)), up);
+            effects.flipReset(toThreePos(car.body.pos));
+          }
           break;
         case 'boostPickup':
           if (car) effects.boostPickup(toThreePos(car.body.pos), e.big);
@@ -432,9 +459,9 @@
         while (accumulator >= TICK && steps < 10) {
           capture(carPrev, ballPrev);
           const controls = [Object.assign({}, playerControls)];
-          if (session.bot) controls[1] = session.bot.tick();
+          session.bots.forEach(b => { controls[b.index] = b.tick(); });
           world.step(controls);
-          if (session.bot && session.bot.afterStep) session.bot.afterStep();
+          session.bots.forEach(b => { if (b.afterStep) b.afterStep(); });
           capture(carCurr, ballCurr);
           simTime += TICK;
           accumulator -= TICK;
@@ -534,6 +561,8 @@
       }
     });
     ballView.update(ballDraw.pos, ballDraw.quat);
+    ballArrow.update(dt, carDraw[0].pos, carDraw[0].quat, ballDraw.pos,
+      chase.ballCam && !inMenu && !inReplay && ballVisible && !!datas[0] && !datas[0].demoed);
 
     const me = datas[0] || { supersonic: false, boosting: false, speed: 0 };
     if (!paused && !inMenu && me.supersonic && !wasSupersonic) {

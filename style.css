@@ -359,7 +359,7 @@ kbd { font-family: var(--font); font-size: 10px; border: 1px solid rgba(87,217,2
 .mm-logo { font-size: 84px; font-weight: 700; font-style: italic; letter-spacing: 6px; line-height: 0.9; display: flex; gap: 16px; }
 .mm-logo .accent { color: var(--orange); text-shadow: 0 0 34px var(--orange-glow); }
 .mm-tag { margin-top: -10px; font-size: 13px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; }
-.mm-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.mm-modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .mm-card { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 18px; text-align: left; cursor: pointer; color: var(--text);
   background: linear-gradient(160deg, rgba(20, 30, 50, 0.9), rgba(10, 15, 26, 0.9)); border: 2px solid rgba(255, 255, 255, 0.08); border-radius: 16px;
   transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.25s ease; overflow: hidden; }
@@ -387,6 +387,20 @@ kbd { font-family: var(--font); font-size: 10px; border: 1px solid rgba(87,217,2
 .mm-opp-avatar.mirror { background: linear-gradient(135deg, #5fe3ff, #c7f2ff); color: #0b1422; }
 .mm-opp-avatar.none { background: rgba(255, 255, 255, 0.12); }
 .mm-mirror-axis { margin-top: 8px; }
+.mm-opp[hidden] { display: none; }
+
+/* ---------------- Garage ---------------- */
+.modal-box.garage-box { width: min(760px, 94vw); height: auto; max-height: 90vh; }
+.garage-cars { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 8px; }
+.garage-car { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; cursor: pointer; text-align: left; color: var(--text);
+  background: rgba(12, 18, 30, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease; }
+.garage-car:hover { transform: translateY(-3px); border-color: rgba(87, 217, 255, 0.5); }
+.garage-car.active { border-color: var(--orange); box-shadow: 0 0 26px rgba(255, 138, 43, 0.3), inset 0 0 26px rgba(255, 138, 43, 0.08); }
+.garage-thumb { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; object-fit: cover; background: radial-gradient(circle at 50% 70%, #26324a, #0b1220); }
+.garage-name { font-size: 18px; font-weight: 700; font-style: italic; letter-spacing: 0.5px; }
+.garage-desc { font-size: 12px; color: var(--muted); }
+.garage-note { margin-top: 14px; font-size: 12px; color: var(--muted); }
+.garage-spacer { flex: 1; }
 .mm-opp-name { font-size: 16px; font-weight: 700; }
 .mm-opp-desc { font-size: 12px; color: var(--muted); }
 .mm-seg { display: inline-flex; gap: 6px; padding: 5px; background: rgba(12, 18, 30, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; align-self: flex-start; }
@@ -431,8 +445,6 @@ kbd { font-family: var(--font); font-size: 10px; border: 1px solid rgba(87,217,2
 #flip-indicator.fi-hidden { opacity: 0; }
 @keyframes fiPulse { 50% { transform: scale(1.12); } }
 
-#flip-popup { position: absolute; left: 50%; top: 24%; transform: translateX(-50%); animation: none !important; }
-#flip-popup span { display: inline-block; font-size: 46px; font-weight: 700; font-style: italic; letter-spacing: 4px; color: #fff; -webkit-text-stroke: 2px #ff4fd8; text-shadow: 0 0 26px rgba(255, 79, 216, 0.85); animation: flipPop 1.2s cubic-bezier(.2, 1.4, .4, 1) both; }
 @keyframes flipPop { 0% { opacity: 0; transform: scale(2.2) rotate(-6deg); filter: blur(6px); } 20% { opacity: 1; transform: none; filter: none; } 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-24px); } }
 
 /* Supersonic screen edge glow */

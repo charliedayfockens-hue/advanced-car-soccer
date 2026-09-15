@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,600;0,700;1,700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css?v=58" />
+<link rel="stylesheet" href="style.css?v=59" />
 </head>
 <body>
 
@@ -66,7 +66,6 @@
     <svg viewBox="0 0 24 24" class="fi-icon"><path fill="currentColor" d="M12 3.5a8.5 8.5 0 0 1 7.9 5.3H22l-3.3 4-3.4-4h2.3A6.3 6.3 0 0 0 5.9 10.6l-2.1-.6A8.5 8.5 0 0 1 12 3.5zM2 11.2h0l3.3-4 3.4 4H6.4a6.3 6.3 0 0 0 11.7 2.2l2.1.6A8.5 8.5 0 0 1 4.1 15.2H2z" /></svg>
     <span id="fi-label" class="fi-label">FLIP</span>
   </div>
-  <div id="flip-popup" class="hidden"><span>FLIP RESET</span></div>
   <div id="sonic-frame"></div>
 
   <div id="toast-stack"></div>
@@ -110,6 +109,11 @@
         <span class="mm-card-title">1v1 Match</span>
         <span class="mm-card-desc">Five minutes against a bot. Boost pads, demos, overtime on a tie.</span>
       </button>
+      <button class="mm-card" data-mode="2v2">
+        <svg viewBox="0 0 24 24" class="mm-icon"><path fill="currentColor" d="M5 5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zm4.5 0a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zm5 0a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zm4.5 0a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM1 18c0-2.6 1.8-5 4-5s4 2.4 4 5zm4.5 0c0-2.6 1.8-5 4-5s4 2.4 4 5zm5 0c0-2.6 1.8-5 4-5s4 2.4 4 5zm4.5 0c0-2.6 1.8-5 4-5s4 2.4 4 5z"/></svg>
+        <span class="mm-card-title">2v2 Match</span>
+        <span class="mm-card-desc">You and a bot teammate against two bots. Same rules as 1v1.</span>
+      </button>
     </div>
 
     <div id="mm-opponent-section" class="mm-section">
@@ -135,6 +139,7 @@
     </div>
 
     <div class="mm-actions">
+      <button id="mm-garage" class="btn-secondary">Garage</button>
       <button id="mm-settings" class="btn-secondary">Settings</button>
       <button id="mm-play" class="btn-primary mm-play">Play</button>
     </div>
@@ -149,6 +154,27 @@
     <div class="end-actions">
       <button id="end-menu" class="btn-secondary">Main menu</button>
       <button id="end-again" class="btn-primary">Play again</button>
+    </div>
+  </div>
+</div>
+
+<div id="garage-modal" class="modal hidden">
+  <div class="modal-box garage-box" role="dialog" aria-labelledby="garage-title">
+    <div class="modal-header">
+      <div class="modal-title" id="garage-title">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M5 11 6.6 6.3A2 2 0 0 1 8.5 5h7a2 2 0 0 1 1.9 1.3L19 11a2 2 0 0 1 2 2v4h-2a2.5 2.5 0 0 1-5 0h-4a2.5 2.5 0 0 1-5 0H3v-4a2 2 0 0 1 2-2zm2.2 0h9.6l-1.2-3.6a.6.6 0 0 0-.6-.4H9a.6.6 0 0 0-.6.4z"/></svg>
+        Garage
+      </div>
+      <button id="garage-close" class="icon-btn" aria-label="Close garage">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="mm-label">Cars</div>
+      <div id="garage-cars" class="garage-cars"></div>
+      <div class="garage-note">Every car uses the same hitbox, so they all drive the same.</div>
+    </div>
+    <div class="modal-footer">
+      <span class="garage-spacer"></span>
+      <button id="garage-done" class="btn-primary">Done</button>
     </div>
   </div>
 </div>
@@ -210,6 +236,7 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSUtils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSCurve.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/environments/RoomEnvironment.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
@@ -218,25 +245,25 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
-<script src="js/constants.js?v=58"></script>
-<script src="js/settings.js?v=58"></script>
-<script src="js/assets.js?v=58"></script>
-<script src="js/math.js?v=58"></script>
-<script src="js/arena.js?v=58"></script>
-<script src="js/physics.js?v=58"></script>
-<script src="js/car.js?v=58"></script>
-<script src="js/world.js?v=58"></script>
-<script src="js/replay.js?v=58"></script>
-<script src="js/bots.js?v=58"></script>
-<script src="js/bots-necto.js?v=58"></script>
-<script src="js/arenaMesh.js?v=58"></script>
-<script src="js/view.js?v=58"></script>
-<script src="js/effects.js?v=58"></script>
-<script src="js/stadium.js?v=58"></script>
-<script src="js/camera.js?v=58"></script>
-<script src="js/input.js?v=58"></script>
-<script src="js/audio.js?v=58"></script>
-<script src="js/ui.js?v=58"></script>
-<script src="js/main.js?v=58"></script>
+<script src="js/constants.js?v=59"></script>
+<script src="js/settings.js?v=59"></script>
+<script src="js/assets.js?v=59"></script>
+<script src="js/math.js?v=59"></script>
+<script src="js/arena.js?v=59"></script>
+<script src="js/physics.js?v=59"></script>
+<script src="js/car.js?v=59"></script>
+<script src="js/world.js?v=59"></script>
+<script src="js/replay.js?v=59"></script>
+<script src="js/bots.js?v=59"></script>
+<script src="js/bots-necto.js?v=59"></script>
+<script src="js/arenaMesh.js?v=59"></script>
+<script src="js/view.js?v=59"></script>
+<script src="js/effects.js?v=59"></script>
+<script src="js/stadium.js?v=59"></script>
+<script src="js/camera.js?v=59"></script>
+<script src="js/input.js?v=59"></script>
+<script src="js/audio.js?v=59"></script>
+<script src="js/ui.js?v=59"></script>
+<script src="js/main.js?v=59"></script>
 </body>
 </html>
