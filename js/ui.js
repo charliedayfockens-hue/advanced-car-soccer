@@ -639,21 +639,151 @@ Game.UI = (function () {
   const isMainMenuOpen = () => !$('main-menu').classList.contains('hidden');
   let menuBound = false, menuOpts = null;
 
+  // ---------------- bot picker ----------------
+  const NONE_BOT = { id: 'none', name: 'No Bot', desc: 'Just you and the ball. Practise with the training tools, ball control keys and unlimited boost.', modes: ['freeplay'] };
+  // Skill tier, what drives the bot, and rough ratings out of 100 (offense, defense, mechanics, aggression)
+  const BOT_META = {
+    none: { tier: 'Training', type: 'Solo practice' },
+    mirror: { tier: 'Training', type: 'Scripted' },
+    rookie: { tier: 'Rookie', type: 'Scripted', stats: [25, 20, 10, 45] },
+    bowie: { tier: 'Meme', type: 'Scripted', stats: [5, 5, 25, 100] },
+    botimus: { tier: 'Diamond', type: 'Scripted', stats: [64, 62, 55, 66] },
+    bumblebee: { tier: 'Diamond', type: 'Hivemind', stats: [58, 72, 50, 55] },
+    element: { tier: 'Diamond', type: 'Neural network', stats: [62, 56, 58, 64] },
+    necto: { tier: 'Champion', type: 'Neural network', stats: [74, 70, 72, 72] },
+    opti: { tier: 'Grand Champion', type: 'Network + scripted', stats: [82, 78, 80, 90] },
+    nexto: { tier: 'Grand Champion', type: 'Neural network', stats: [86, 82, 86, 82] },
+    coconut: { tier: 'Supersonic Legend', type: 'Neural network', stats: [93, 80, 96, 86] }
+  };
+  const STAT_NAMES = ['Offense', 'Defense', 'Mechanics', 'Aggression'];
+  const botMeta = id => BOT_META[id] || { tier: 'Bot', type: 'Custom' };
+  const slug = s => s.toLowerCase().replace(/[^a-z]+/g, '-');
+  const initials = name => name.split(/\s+/).filter(w => /^[A-Za-z]/.test(w)).slice(0, 2).map(w => w[0].toUpperCase()).join('') || name[0];
+  const allBots = () => (menuOpts && menuOpts.opponents) || [];
+  const botById = id => (id === 'none' ? NONE_BOT : allBots().find(o => o.id === id) || NONE_BOT);
+
+  function botAvatar(o, size) {
+    const a = el('div', 'bot-avatar ' + size + ' av-' + o.id);
+    a.appendChild(el('span', '', o.id === 'none' ? '∅' : initials(o.name)));
+    return a;
+  }
+  const tierBadge = id => el('span', 'bot-tier tier-' + slug(botMeta(id).tier), botMeta(id).tier);
+
+  function renderBotPick(btn, o) {
+    const m = botMeta(o.id), body = el('div', 'bot-pick-body'), sub = el('div', 'bot-pick-sub');
+    const type = o.id === 'mirror' ? (S.get('menu').mirrorAxis === 'sides' ? 'Mirrors left / right' : 'Mirrors across midfield') : m.type;
+    sub.append(tierBadge(o.id), el('span', 'bot-card-type', type));
+    body.append(el('div', 'bot-pick-name', o.name), sub);
+    btn.innerHTML = '';
+    btn.append(botAvatar(o, 'md'), body, el('span', 'bot-pick-change', 'Change'));
+  }
+
+  const picker = { kind: 'opponent', pending: null };
+  const isBotsOpen = () => !$('bots-modal').classList.contains('hidden');
+  const pickerBots = () => (picker.kind === 'opponent' ? allBots().filter(o => o.modes.some(md => md !== 'freeplay'))
+    : [NONE_BOT].concat(allBots().filter(o => o.modes.includes('freeplay'))));
+  const playsMode = o => picker.kind !== 'opponent' || o.modes.includes(S.get('menu').mode);
+
+  function openBots(kind) {
+    picker.kind = kind;
+    picker.pending = S.get('menu')[kind];
+    $('bots-title-text').textContent = kind === 'opponent' ? 'Choose Opponent' : 'Free Play Bot';
+    renderBots();
+    $('bots-modal').classList.remove('hidden');
+  }
+
+  function closeBots(apply) {
+    if (apply && playsMode(botById(picker.pending))) S.set('menu', picker.kind, picker.pending);
+    $('bots-modal').classList.add('hidden');
+    renderMenuState();
+  }
+
+  function renderBots() {
+    const mode = S.get('menu').mode, modes = $('bots-modes');
+    modes.innerHTML = '';
+    modes.hidden = picker.kind !== 'opponent';
+    if (!modes.hidden) {
+      ['1v1', '2v2', '3v3'].forEach(md => {
+        const b = el('button', md === mode ? 'active' : '', md.toUpperCase());
+        b.addEventListener('click', () => {
+          S.set('menu', 'mode', md);
+          if (!playsMode(botById(picker.pending))) { const first = pickerBots().find(playsMode); if (first) picker.pending = first.id; }
+          renderBots();
+          renderMenuState();
+          Game.Audio.uiSelect();
+        });
+        modes.appendChild(b);
+      });
+    }
+    const bots = pickerBots(), ok = bots.filter(playsMode);
+    $('bots-count').textContent = picker.kind === 'opponent' ? ok.length + ' of ' + bots.length + ' bots play ' + mode.toUpperCase() : bots.length + ' options for free play';
+    const grid = $('bots-grid');
+    grid.innerHTML = '';
+    ok.concat(bots.filter(o => !playsMode(o))).forEach((o, i) => {
+      const card = el('button', 'bot-card' + (o.id === picker.pending ? ' active' : '') + (playsMode(o) ? '' : ' locked'));
+      card.dataset.id = o.id;
+      card.style.animationDelay = (i * 0.03) + 's';
+      const body = el('div', 'bot-card-body');
+      body.append(el('div', 'bot-card-name', o.name), tierBadge(o.id), el('div', 'bot-card-type', botMeta(o.id).type));
+      card.append(botAvatar(o, 'md'), body);
+      if (!playsMode(o)) card.appendChild(el('span', 'bot-card-lock', 'Not in ' + mode.toUpperCase()));
+      card.addEventListener('click', () => {
+        picker.pending = o.id;
+        grid.querySelectorAll('.bot-card').forEach(c => c.classList.toggle('active', c.dataset.id === o.id));
+        renderBotDetail();
+        Game.Audio.uiHover();
+      });
+      card.addEventListener('dblclick', () => { if (playsMode(o)) closeBots(true); });
+      grid.appendChild(card);
+    });
+    renderBotDetail();
+  }
+
+  function renderBotDetail() {
+    const o = botById(picker.pending), m = botMeta(o.id), d = $('bots-detail');
+    d.innerHTML = '';
+    const hero = el('div', 'bot-hero glow-' + slug(m.tier)), text = el('div', 'bot-hero-text');
+    text.append(el('div', 'bot-hero-name', o.name), tierBadge(o.id), el('div', 'bot-card-type', m.type));
+    hero.append(botAvatar(o, 'lg'), text);
+    const chips = el('div', 'bot-modes');
+    ['freeplay', '1v1', '2v2', '3v3'].filter(md => o.modes.includes(md)).forEach(md => chips.appendChild(el('span', 'bot-mode-chip', md === 'freeplay' ? 'FREE PLAY' : md.toUpperCase())));
+    d.append(hero, chips, el('p', 'bot-desc', o.desc));
+    if (m.stats) {
+      const stats = el('div', 'bot-stats');
+      m.stats.forEach((v, i) => {
+        const row = el('div', 'bot-stat'), bar = el('div', 'bot-stat-bar'), fill = el('div', 'bot-stat-fill');
+        fill.style.width = v + '%';
+        bar.appendChild(fill);
+        row.append(el('span', 'bot-stat-name', STAT_NAMES[i]), bar, el('span', 'bot-stat-val', String(v)));
+        stats.appendChild(row);
+      });
+      d.appendChild(stats);
+    }
+    if (o.id === 'mirror') {
+      const seg = el('div', 'mm-seg');
+      [['midfield', 'Across midfield'], ['sides', 'Left / right']].forEach(([axis, label]) => {
+        const b = el('button', S.get('menu').mirrorAxis === axis ? 'active' : '', label);
+        b.addEventListener('click', () => { S.set('menu', 'mirrorAxis', axis); renderBotDetail(); Game.Audio.uiSelect(); });
+        seg.appendChild(b);
+      });
+      d.append(el('div', 'mm-label', 'Mirror side'), seg);
+    }
+    const can = playsMode(o);
+    if (!can) d.appendChild(el('div', 'bot-note', o.name + " doesn't play " + S.get('menu').mode.toUpperCase() + '. Pick one of its modes above.'));
+    $('bots-select').disabled = !can;
+  }
+
   function renderMenuState() {
     const m = S.get('menu');
     document.querySelectorAll('.mm-card').forEach(c => c.classList.toggle('active', c.dataset.mode === m.mode));
-    const matchMode = m.mode === '1v1' || m.mode === '2v2' || m.mode === '3v3';
+    const matchMode = m.mode !== 'freeplay';
     $('mm-opponent-section').classList.toggle('collapsed', !matchMode);
-    $('mm-freeplay-section').classList.toggle('collapsed', m.mode !== 'freeplay');
-    // Only bots that play the chosen match mode are listed; keep a valid one selected
-    const opps = [...document.querySelectorAll('#mm-opponents .mm-opp')];
-    opps.forEach(o => { o.hidden = matchMode && !o.dataset.modes.split(' ').includes(m.mode); });
-    const shown = opps.filter(o => !o.hidden);
-    if (matchMode && shown.length && !shown.some(o => o.dataset.id === m.opponent)) S.set('menu', 'opponent', shown[0].dataset.id);
-    opps.forEach(o => o.classList.toggle('active', o.dataset.id === S.get('menu').opponent));
-    document.querySelectorAll('#mm-freeplay-bots .mm-opp').forEach(o => o.classList.toggle('active', o.dataset.id === m.freeplayBot));
-    $('mm-mirror-axis').classList.toggle('hidden', m.freeplayBot !== 'mirror');
-    document.querySelectorAll('#mm-mirror-axis button').forEach(b => b.classList.toggle('active', b.dataset.axis === m.mirrorAxis));
+    $('mm-freeplay-section').classList.toggle('collapsed', matchMode);
+    // Keep an opponent selected that plays the chosen match mode
+    const playable = allBots().filter(o => o.modes.includes(m.mode));
+    if (matchMode && playable.length && !playable.some(o => o.id === m.opponent)) S.set('menu', 'opponent', playable[0].id);
+    renderBotPick($('mm-bot-pick'), botById(S.get('menu').opponent));
+    renderBotPick($('mm-fp-pick'), botById(m.freeplayBot));
     const style = S.get('graphics').boostStyle;
     document.querySelectorAll('#mm-boost button').forEach(b => b.classList.toggle('active', b.dataset.boost === style));
   }
@@ -662,24 +792,19 @@ Game.UI = (function () {
     menuOpts = opts;
     if (!menuBound) {
       menuBound = true;
-      const addBot = (list, o, settingKey) => {
-        const b = el('button', 'mm-opp');
-        b.dataset.id = o.id;
-        b.dataset.modes = (o.modes || []).join(' ');
-        const av = el('div', 'mm-opp-avatar ' + o.id, o.name[0]);
-        const text = el('div');
-        text.append(el('div', 'mm-opp-name', o.name), el('div', 'mm-opp-desc', o.desc));
-        b.append(av, text);
-        b.addEventListener('click', () => { S.set('menu', settingKey, o.id); renderMenuState(); Game.Audio.uiSelect(); });
-        b.addEventListener('mouseenter', () => Game.Audio.uiHover());
-        list.appendChild(b);
-      };
-      opts.opponents.filter(o => o.modes.some(md => md !== 'freeplay')).forEach(o => addBot($('mm-opponents'), o, 'opponent'));
-      addBot($('mm-freeplay-bots'), { id: 'none', name: 'No bot', desc: 'Just you and the ball.' }, 'freeplayBot');
-      opts.opponents.filter(o => o.modes.includes('freeplay')).forEach(o => addBot($('mm-freeplay-bots'), o, 'freeplayBot'));
-      document.querySelectorAll('#mm-mirror-axis button').forEach(b => b.addEventListener('click', () => {
-        S.set('menu', 'mirrorAxis', b.dataset.axis); renderMenuState(); Game.Audio.uiSelect();
-      }));
+      [['mm-bot-pick', 'opponent'], ['mm-fp-pick', 'freeplayBot']].forEach(([id, kind]) => {
+        $(id).addEventListener('click', () => { openBots(kind); Game.Audio.uiSelect(); });
+        $(id).addEventListener('mouseenter', () => Game.Audio.uiHover());
+      });
+      $('bots-close').addEventListener('click', () => closeBots(false));
+      $('bots-cancel').addEventListener('click', () => closeBots(false));
+      $('bots-select').addEventListener('click', () => closeBots(true));
+      $('bots-modal').addEventListener('click', e => { if (e.target === $('bots-modal')) closeBots(false); });
+      document.addEventListener('keydown', e => {
+        if (!isBotsOpen()) return;
+        if (e.code === 'Escape') { e.preventDefault(); closeBots(false); }
+        else if (e.code === 'Enter' && !$('bots-select').disabled) { e.preventDefault(); closeBots(true); }
+      });
       document.querySelectorAll('.mm-card').forEach(c => {
         c.addEventListener('click', () => { S.set('menu', 'mode', c.dataset.mode); renderMenuState(); Game.Audio.uiSelect(); });
         c.addEventListener('mouseenter', () => Game.Audio.uiHover());
