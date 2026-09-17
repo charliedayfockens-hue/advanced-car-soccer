@@ -54,7 +54,11 @@ Game.View = (function () {
     { id: 'nixxan', name: 'Nixxan Silaiva', type: 'obj', url: 'assets/cars/nixxan/nixxan.obj', desc: 'Light 90s drift coupe with pop-up attitude.' },
     { id: 'porke', name: 'Porke 912 Spider', type: 'glb', url: 'assets/cars/porke/porke.glb', desc: 'Low hybrid hypercar with an open top.' },
     { id: 'endline', name: 'Nixxan Endline', type: 'fbx', url: 'assets/cars/endline/endline.fbx', desc: 'Legendary turbo coupe from the tuner era.' },
-    { id: 'trista', name: 'Trista Landster', type: 'fbx', url: 'assets/cars/trista/trista.fbx', desc: 'Electric roadster with a glass roof.' }
+    { id: 'trista', name: 'Trista Landster', type: 'fbx', url: 'assets/cars/trista/trista.fbx', desc: 'Electric roadster with a glass roof.' },
+    { id: 'formula', name: 'Formula Car', type: 'glb', url: 'assets/cars/formula/formula.glb', desc: 'Open-wheel single-seater with giant front and rear wings.' },
+    { id: 'panini', name: 'Panini Unopia', type: 'glb', url: 'assets/cars/panini/panini.glb', desc: 'Hand-built hypercar with a carbon body and quad exhausts.' },
+    { id: 'clamvorgini', name: 'Clamvorgini Gulpardo', type: 'glb', url: 'assets/cars/clamvorgini/clamvorgini.glb', desc: 'Sharp mid-engine supercar with a V10 wail.' },
+    { id: 'mslauren', name: 'MsLauren F1', type: 'glb', url: 'assets/cars/mslauren/mslauren.glb', desc: 'Legendary 90s three-seater supercar with a gold engine bay.' }
   ];
 
   const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAMAASsJTYQAAAAASUVORK5CYII=';
@@ -407,7 +411,136 @@ Game.View = (function () {
     return buildCar(parts);
   }
 
-  const PREPARE = { surbabu: prepareSurbabu, nixxan: prepareNixxan, porke: preparePorke, endline: prepareEndline, trista: prepareTrista };
+  // Generic garage car from a converted GLB that keeps its own textured materials. cfg:
+  //  frame: 'canonical' (+Z forward, +X left, +Y up), 'zUpNegY' (+Z up, nose toward -Y) or 'wheels' (worked out
+  //         from the four tire centres, with `rear` naming a part at the back such as the tail lights)
+  //  tire: material regex of tires (a mesh holding several tires is split into one per corner)
+  //  paint / accent / glass: material regexes swapped for team paint, lighter paint and tinted glass
+  //  paintPart(part): optional extra test for team paint; fixed: regex of wheel parts that don't spin (calipers)
+  //  skip(mesh, size, names): drop a mesh (interiors, ground planes)
+  function prepareGeneric(obj, cfg) {
+    obj.updateMatrixWorld(true);
+    const primary = role('primary'), accent = role('accent');
+    const glass = new THREE.MeshPhysicalMaterial({ color: 0x0a0f18, roughness: 0.05, metalness: 0.2, clearcoat: 1, transparent: true, opacity: 0.72 });
+    const parts = [];
+    obj.traverse(o => {
+      if (!o.isMesh || !o.geometry.attributes.position || !o.geometry.attributes.position.count) return;
+      const src = [].concat(o.material), names = src.map(m => m.name || '').join(' ');
+      // Plain Float32 attributes: GLB files often interleave vertex data, which toNonIndexed() can't read here
+      const geometry = new THREE.BufferGeometry();
+      Object.keys(o.geometry.attributes).forEach(name => {
+        const a = o.geometry.attributes[name], arr = new Float32Array(a.count * a.itemSize), get = ['getX', 'getY', 'getZ', 'getW'];
+        for (let i = 0; i < a.count; i++) for (let c = 0; c < a.itemSize; c++) arr[i * a.itemSize + c] = a[get[c]](i);
+        geometry.setAttribute(name, new THREE.BufferAttribute(arr, a.itemSize));
+      });
+      if (o.geometry.index) geometry.setIndex(Array.from(o.geometry.index.array));
+      o.geometry.groups.forEach(g => geometry.addGroup(g.start, g.count, g.materialIndex));
+      geometry.applyMatrix4(o.matrixWorld);
+      geometry.computeBoundingBox();
+      const size = geometry.boundingBox.getSize(new THREE.Vector3());
+      if (cfg.skip && cfg.skip(o, size, names)) return;
+      const part = { geometry, names, size };
+      const mats = src.map(m => {
+        const n = m.name || '';
+        if ((cfg.paint && cfg.paint.test(n)) || (cfg.paintPart && cfg.paintPart(part, n))) return primary;
+        if (cfg.accent && cfg.accent.test(n)) return accent;
+        if (cfg.glass && cfg.glass.test(n)) return glass;
+        if (m.transparent) m.depthWrite = false;
+        return m;
+      });
+      part.material = mats.length === 1 ? mats[0] : mats;
+      parts.push(part);
+    });
+    const isTire = p => cfg.tire.test(p.names);
+    const centerOf = g => { g.computeBoundingBox(); return g.boundingBox.getCenter(new THREE.Vector3()); };
+
+    // Into model space
+    const M = new THREE.Matrix4();
+    if (cfg.frame === 'zUpNegY') {
+      M.set(1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1);
+    } else if (cfg.frame === 'wheels') {
+      const cs = parts.filter(isTire).map(p => centerOf(p.geometry));
+      const pairings = [[[0, 1], [2, 3]], [[0, 2], [1, 3]], [[0, 3], [1, 2]]];
+      const best = pairings.reduce((a, b) => (cs[b[0][0]].distanceTo(cs[b[0][1]]) + cs[b[1][0]].distanceTo(cs[b[1][1]]) <
+        cs[a[0][0]].distanceTo(cs[a[0][1]]) + cs[a[1][0]].distanceTo(cs[a[1][1]]) ? b : a));
+      const axles = best.map(([i, j]) => ({ mid: cs[i].clone().add(cs[j]).multiplyScalar(0.5), across: cs[i].clone().sub(cs[j]) }));
+      const rearPart = parts.find(p => cfg.rear && cfg.rear.test(p.names));
+      const rc = rearPart ? centerOf(rearPart.geometry) : axles[1].mid;
+      if (axles[0].mid.distanceTo(rc) < axles[1].mid.distanceTo(rc)) axles.reverse();
+      const f = axles[0].mid.clone().sub(axles[1].mid).normalize();
+      let left = axles[0].across.clone().normalize();
+      let up = f.clone().cross(left).normalize();
+      if (up.y < 0) { up.negate(); left.negate(); }
+      left = up.clone().cross(f).normalize();
+      M.makeBasis(left, up, f).invert();
+    }
+    parts.forEach(p => p.geometry.applyMatrix4(M));
+
+    // Centre the wheels on the origin so the corners are the four quadrants
+    const tireBox = new THREE.Box3();
+    parts.filter(isTire).forEach(p => { p.geometry.computeBoundingBox(); tireBox.union(p.geometry.boundingBox); });
+    const tc = tireBox.getCenter(new THREE.Vector3());
+    parts.forEach(p => p.geometry.translate(-tc.x, 0, -tc.z));
+
+    // One tire per corner
+    const out = [], tires = [];
+    parts.forEach(p => {
+      if (!isTire(p)) { out.push(p); return; }
+      const g = p.geometry.index ? p.geometry.toNonIndexed() : p.geometry, P = g.attributes.position;
+      const buckets = [[], [], [], []];
+      for (let i = 0; i + 2 < P.count; i += 3) {
+        const x = P.getX(i) + P.getX(i + 1) + P.getX(i + 2), z = P.getZ(i) + P.getZ(i + 1) + P.getZ(i + 2);
+        buckets[(z > 0 ? 0 : 2) + (x > 0 ? 1 : 0)].push(i);
+      }
+      const material = Array.isArray(p.material) ? p.material[0] : p.material;
+      buckets.forEach(tris => {
+        if (!tris.length) return;
+        const piece = new THREE.BufferGeometry();
+        ['position', 'normal', 'uv'].forEach(name => {
+          const a = g.attributes[name];
+          if (!a) return;
+          const arr = new Float32Array(tris.length * 3 * a.itemSize);
+          tris.forEach((t, k) => { for (let v = 0; v < 3; v++) for (let c = 0; c < a.itemSize; c++) arr[(k * 3 + v) * a.itemSize + c] = a.getComponent ? a.getComponent(t + v, c) : a.array[(t + v) * a.itemSize + c]; });
+          piece.setAttribute(name, new THREE.BufferAttribute(arr, a.itemSize));
+        });
+        const t = { geometry: piece, material, names: p.names, wheel: { tire: true, spins: true } };
+        t.center = centerOf(piece);
+        t.radius = piece.boundingBox.getSize(new THREE.Vector3()).y / 2;
+        tires.push(t);
+        out.push(t);
+      });
+    });
+
+    // Rims, discs and calipers go with the nearest tire
+    out.forEach(p => {
+      if (p.wheel) return;
+      const c = centerOf(p.geometry), size = p.geometry.boundingBox.getSize(new THREE.Vector3());
+      const near = tires.reduce((a, t) => (!a || t.center.distanceTo(c) < a.center.distanceTo(c) ? t : a), null);
+      p.wheel = near && near.center.distanceTo(c) < near.radius * 0.9 && Math.max(size.x, size.y, size.z) < near.radius * 2.4
+        ? { tire: false, spins: !(cfg.fixed && cfg.fixed.test(p.names)) } : null;
+    });
+    return buildCar(out);
+  }
+
+  const PREPARE = {
+    surbabu: prepareSurbabu, nixxan: prepareNixxan, porke: preparePorke, endline: prepareEndline, trista: prepareTrista,
+    formula: obj => prepareGeneric(obj, {
+      frame: 'zUpNegY', tire: /Rubber/,
+      paintPart: (p, n) => /Carbon/.test(n) && p.size.x * p.size.y * p.size.z > 0.02
+    }),
+    panini: obj => prepareGeneric(obj, {
+      frame: 'wheels', tire: /Wheel1A_Tire/, rear: /GlassRed/, paint: /CarPaint/, glass: /^Window$|GlassClear/, fixed: /Calliper/,
+      skip: (o, size, names) => /Interior/.test(names)
+    }),
+    clamvorgini: obj => prepareGeneric(obj, {
+      frame: 'canonical', tire: /^tire$/, paint: /^paint$/, accent: /^paint_sec$/, glass: /^glass$|glass_trans/, fixed: /caliper/,
+      skip: (o, size, names) => /^interior$|dashbard/.test(names)
+    }),
+    mslauren: obj => prepareGeneric(obj, {
+      frame: 'canonical', tire: /^tire/, paint: /McLaren_F1_1993/, accent: /RED_LINE/, glass: /windo|headlightglass/,
+      skip: (o, size, names) => Math.max(size.x, size.y, size.z) > 6 || Math.min(size.x, size.y, size.z) < 0.001 || /floor|interior|grill_3/.test(names)
+    })
+  };
 
   function prepareBall(obj, tex) {
     const B = n => 'assets/ball/' + n;

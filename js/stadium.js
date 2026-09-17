@@ -418,12 +418,12 @@ Game.Stadium = (function () {
       side: THREE.BackSide, depthWrite: false, fog: false,
       uniforms: {
         top: { value: lin(T.sky[0]) }, mid: { value: lin(T.sky[1]) }, horizon: { value: lin(T.sky[2]) },
-        sunDir: { value: sd }, sunColor: { value: lin(T.sunColor) }, clouds: { value: T.clouds }, uTime: TIME
+        sunDir: { value: sd }, sunColor: { value: lin(T.sunColor) }, clouds: { value: T.clouds }, stars: { value: T.stars || 0 }, uTime: TIME
       },
       vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
       fragmentShader: `
         uniform vec3 top; uniform vec3 mid; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunColor;
-        uniform float clouds; uniform float uTime; varying vec3 vDir;
+        uniform float clouds; uniform float stars; uniform float uTime; varying vec3 vDir;
         float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
         float vn(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
           return mix(mix(h21(i), h21(i + vec2(1, 0)), u.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), u.x), u.y); }
@@ -441,6 +441,11 @@ Game.Stadium = (function () {
             float cl = smoothstep(0.48, 0.82, n) * clouds * smoothstep(0.0, 0.2, y);
             vec3 cloudCol = mix(vec3(0.95), sunColor, 0.35) * (0.75 + 0.5 * sd);
             c = mix(c, cloudCol, cl * 0.85);
+          }
+          if (stars > 0.0 && y > 0.02) {
+            vec2 sp = floor(d.xz / (y + 0.35) * 260.0);
+            float st = step(0.9965, h21(sp)) * (0.6 + 0.4 * sin(uTime * 2.0 + h21(sp + 3.1) * 40.0));
+            c += vec3(0.9, 0.95, 1.0) * st * stars * smoothstep(0.02, 0.25, y);
           }
           c = mix(c, horizon * 0.6, smoothstep(0.0, -0.3, y));
           gl_FragColor = vec4(c, 1.0);
@@ -526,7 +531,7 @@ Game.Stadium = (function () {
     const L0 = -1350;
 
     // ground around the arena
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(90000, 90000), new THREE.MeshStandardMaterial({ color: 0x1b1f26, roughness: 1 }));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(90000, 90000), new THREE.MeshStandardMaterial({ color: col(T.ground || '#1b1f26'), roughness: 1 }));
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -6;
     root.add(ground);
@@ -543,20 +548,24 @@ Game.Stadium = (function () {
     const crowdMat = new THREE.MeshStandardMaterial({ map: crowd, roughness: 1, emissive: 0xffffff, emissiveMap: crowd, emissiveIntensity: 0.22 });
     const tier = profile => new THREE.Mesh(orient(sweep(outline, profile, { uScale: 2900, vScale: 1450 }), towardField), crowdMat);
     root.add(tier([{ l: L0, z: 280 }, { l: L0 - 80, z: 330 }, { l: -3500, z: 2050 }]));
-    root.add(tier([{ l: -3750, z: 2400 }, { l: -6000, z: 4550 }]));
+    // Open-air maps keep only the lower tier, so the scenery beyond shows over the stands
+    const closed = !T.open;
+    if (closed) root.add(tier([{ l: -3750, z: 2400 }, { l: -6000, z: 4550 }]));
     const band = new THREE.Mesh(orient(sweep(outline, [{ l: -3500, z: 2050 }, { l: -3500, z: 2330 }, { l: -3750, z: 2400 }]), towardField), structure);
     root.add(band);
     const bandLights = new THREE.Mesh(orient(sweep(outline, [{ l: -3502, z: 2170 }, { l: -3502, z: 2210 }]), towardField),
       new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.7, 2.0), toneMapped: false }));
     root.add(bandLights);
-    root.add(new THREE.Mesh(orient(sweep(outline, [{ l: -6000, z: 4550 }, { l: -6000, z: 5200 }]), towardField), structure));
+    if (closed) root.add(new THREE.Mesh(orient(sweep(outline, [{ l: -6000, z: 4550 }, { l: -6000, z: 5200 }]), towardField), structure));
 
     // roof ring with a lit inner edge
-    const roofGeo = sweep(outline, [{ l: -6000, z: 5200 }, { l: -6100, z: 5700 }, { l: -1900, z: 6300 }, { l: -1900, z: 6050 }, { l: -6000, z: 5200 }]);
-    roofGeo.computeVertexNormals();
-    const roofMat = structure.clone();
-    roofMat.side = THREE.DoubleSide;
-    root.add(new THREE.Mesh(roofGeo, roofMat));
+    if (closed) {
+      const roofGeo = sweep(outline, [{ l: -6000, z: 5200 }, { l: -6100, z: 5700 }, { l: -1900, z: 6300 }, { l: -1900, z: 6050 }, { l: -6000, z: 5200 }]);
+      roofGeo.computeVertexNormals();
+      const roofMat = structure.clone();
+      roofMat.side = THREE.DoubleSide;
+      root.add(new THREE.Mesh(roofGeo, roofMat));
+    }
 
     const lightMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 2.35, 2.2), toneMapped: false });
     const spacing = 520;
@@ -573,7 +582,7 @@ Game.Stadium = (function () {
       m4.compose(new THREE.Vector3(x - a.nx * 2050, 6030, y - a.ny * 2050), q, new THREE.Vector3(1, 1, 1));
       lights.setMatrixAt(k, m4);
     }
-    root.add(lights);
+    if (closed) root.add(lights);
 
     // corner floodlight towers
     [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => {
@@ -672,7 +681,9 @@ Game.Stadium = (function () {
 
   // ---------------- build ----------------
   function build(scene, opts) {
-    const T = THEMES[opts.theme] || THEMES.realistic;
+    // A map's palette goes on top of the theme; its scenery is added after the stands
+    const map = Game.Maps ? Game.Maps.get(opts.map) : null;
+    const T = Object.assign({}, THEMES[opts.theme] || THEMES.realistic, map ? map.palette : {});
     const root = new THREE.Group();
     const scenery = new THREE.Group();
     const anims = [];
@@ -703,6 +714,7 @@ Game.Stadium = (function () {
     root.add(arenaShell(T));
     root.add(glassShell(T));
     const stadium = buildScenery(scenery, T, anims);
+    if (map && map.extras) map.extras(scenery, T, anims);
     root.add(scenery);
     const padViews = buildPads(root, opts.boostPads);
     let time = 0;

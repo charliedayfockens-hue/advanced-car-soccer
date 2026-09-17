@@ -795,10 +795,11 @@ window.Game = window.Game || {};
 
   const list = Game.Bots.OPPONENTS;
   list.splice(list.findIndex(o => o.id === 'bowie'), 0,
-    { id: 'botimus', name: 'Botimus Prime', desc: 'Veteran scripted challenger by Darxeal (RLBot tournament regular since 2018). Drives fast and hits hard: speed-flip kickoffs, dodge shots, aerials with double touches, wall bounces and roof dribbles with flicks, then rotates back and shadows you on defence.',
+    { id: 'botimus', name: 'Botimus Prime', desc: 'Scripted bot by Darxeal (RLBot tournament regular since 2018). Drives fast and hits hard: speed-flip kickoffs, dodge shots, aerials with double touches, wall bounces and roof dribbles with flicks, then rotates back and shadows you on defence.',
       modes: ['1v1', '2v2', '3v3'], make: (w, i) => new BotimusBot(w, i), load: () => Promise.resolve() },
     { id: 'bumblebee', name: 'Bumblebee', desc: 'Hivemind team bot by Darxeal & Will. One mind controls every Bumblebee on a team: it splits kickoff duties, reserves boost pads, sends exactly one car for the ball and keeps a defender home. Best in 3v3, where a full team of Bumblebees rotates like a real squad.',
       modes: ['1v1', '2v2', '3v3'], make: (w, i) => new BumblebeeBot(w, i), load: () => Promise.resolve() });
 
-  Object.assign(Game.Botimus, { BotimusBot, BumblebeeBot, Strike, DodgeStrike, GroundStrike, AerialStrike, soloChoose, teamplayChoose });
+  Object.assign(Game.Botimus, { BotimusBot, BumblebeeBot, Strike, DodgeStrike, GroundStrike, AerialStrike, soloChoose, teamplayChoose,
+    GeneralDefense, PickupBoostPad, HalfFlipPickup, DriveBackwardsToGoal, choosePad, anyShot, anyClear });
 })();

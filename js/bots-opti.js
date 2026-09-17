@@ -75,7 +75,7 @@ Game.BotsOpti = (function () {
   const list = Game.Bots.OPPONENTS;
   const after = list.findIndex(o => o.id === 'coconut') >= 0 ? list.findIndex(o => o.id === 'coconut') : list.findIndex(o => o.id === 'nexto');
   list.splice(after + 1, 0,
-    { id: 'opti', name: 'Opti', desc: 'Grand Champion-level challenger, 1v1 only. After Kaiyotech\'s Opti: a selector picks the right sub-model every moment. It plays Nexto\'s network for kickoffs and general play, recovers to land wheels-down, and switches to demo mode when you leave yourself exposed.',
+    { id: 'opti', name: 'Opti', desc: '1v1 only. After Kaiyotech\'s Opti: a selector picks the right sub-model every moment. It plays Nexto\'s network for kickoffs and general play, recovers to land wheels-down, and switches to demo mode when you leave yourself exposed.',
       modes: ['1v1'], make: (w, i) => new OptiBot(w, i), load: () => Game.BotsNecto.loadModel('nexto') });
 
   return { OptiBot };

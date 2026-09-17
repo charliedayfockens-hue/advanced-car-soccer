@@ -19,4 +19,10 @@ Opti - inspired by Kaiyotech's Opti (github.com/Kaiyotech/Opti, no license). Opt
   published and none of its code is used: js/bots-opti.js is an original selector that switches between Nexto's
   network and this game's own recovery and demo controllers.
 
+Wasp - written for this game: Bumblebee's hivemind team roles (from the Botimus Prime & Bumblebee port above) with
+  Nexto's network driving the car sent for the ball.
+
+Trilo - written for this game: Nexto's network plus original freestyle mechanics (dribbles, flicks, air dribbles,
+  flip resets, double taps, ceiling shots, wave dashes, half flips, wall dashes).
+
 Rookie, Bowie Knife 99 and Mirror Bot - written for this game (Mirror Bot after Darxeal's mirror-bot idea).

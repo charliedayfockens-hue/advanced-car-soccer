@@ -653,7 +653,9 @@ Game.UI = (function () {
     necto: { tier: 'Champion', type: 'Neural network', stats: [74, 70, 72, 72] },
     opti: { tier: 'Grand Champion', type: 'Network + scripted', stats: [82, 78, 80, 90] },
     nexto: { tier: 'Grand Champion', type: 'Neural network', stats: [86, 82, 86, 82] },
-    coconut: { tier: 'Supersonic Legend', type: 'Neural network', stats: [93, 80, 96, 86] }
+    coconut: { tier: 'Supersonic Legend', type: 'Neural network', stats: [93, 80, 96, 86] },
+    wasp: { tier: 'Grand Champion', type: 'Hivemind + neural network', stats: [84, 80, 84, 88] },
+    trilo: { tier: 'Grand Champion', type: 'Freestyle: network + mechanics', stats: [84, 60, 95, 90] }
   };
   const STAT_NAMES = ['Offense', 'Defense', 'Mechanics', 'Aggression'];
   const botMeta = id => BOT_META[id] || { tier: 'Bot', type: 'Custom' };
@@ -667,7 +669,8 @@ Game.UI = (function () {
     a.appendChild(el('span', '', o.id === 'none' ? '∅' : initials(o.name)));
     return a;
   }
-  const tierBadge = id => el('span', 'bot-tier tier-' + slug(botMeta(id).tier), botMeta(id).tier);
+  // Ranks are kept in BOT_META for ordering only; the picker just describes each bot
+  const tierBadge = () => document.createDocumentFragment();
 
   function renderBotPick(btn, o) {
     const m = botMeta(o.id), body = el('div', 'bot-pick-body'), sub = el('div', 'bot-pick-sub');
@@ -773,6 +776,49 @@ Game.UI = (function () {
     $('bots-select').disabled = !can;
   }
 
+  // ---------------- arena picker ----------------
+  const RANDOM_MAP = { id: 'random', name: 'Random', desc: 'A different arena every match.', preview: ['#ff8a2b', '#57d9ff', '#6f4cff'] };
+  const allMaps = () => [RANDOM_MAP].concat((menuOpts && menuOpts.maps) || []);
+  const mapById = id => allMaps().find(x => x.id === id) || RANDOM_MAP;
+  const isMapsOpen = () => !$('maps-modal').classList.contains('hidden');
+
+  function mapSwatch(x, cls) {
+    const sw = el('div', cls);
+    sw.style.background = x.id === 'random' ? 'conic-gradient(from 45deg, ' + x.preview.concat(x.preview[0]).join(', ') + ')'
+      : 'linear-gradient(180deg, ' + x.preview[0] + ' 0%, ' + x.preview[1] + ' 55%, ' + x.preview[2] + ' 100%)';
+    if (x.id === 'random') sw.appendChild(el('span', 'map-q', '?'));
+    return sw;
+  }
+
+  function renderMapPick() {
+    const x = mapById(S.get('menu').map || 'random'), btn = $('mm-map-pick'), body = el('div', 'bot-pick-body');
+    body.append(el('div', 'bot-pick-name', x.name), el('div', 'bot-card-type', x.desc));
+    btn.innerHTML = '';
+    btn.append(mapSwatch(x, 'map-swatch sm'), body, el('span', 'bot-pick-change', 'Change'));
+  }
+
+  function openMaps() {
+    const grid = $('maps-grid');
+    grid.innerHTML = '';
+    allMaps().forEach((x, i) => {
+      const card = el('button', 'map-card' + (x.id === (S.get('menu').map || 'random') ? ' active' : ''));
+      card.dataset.id = x.id;
+      card.style.animationDelay = (i * 0.03) + 's';
+      card.append(mapSwatch(x, 'map-swatch'), el('div', 'garage-name', x.name), el('div', 'garage-desc', x.desc));
+      card.addEventListener('click', () => {
+        S.set('menu', 'map', x.id);
+        grid.querySelectorAll('.map-card').forEach(c => c.classList.toggle('active', c.dataset.id === x.id));
+        if (menuOpts.onMapPreview) menuOpts.onMapPreview(x.id);
+        renderMapPick();
+        Game.Audio.uiSelect();
+      });
+      card.addEventListener('mouseenter', () => Game.Audio.uiHover());
+      grid.appendChild(card);
+    });
+    $('maps-modal').classList.remove('hidden');
+  }
+  const closeMaps = () => $('maps-modal').classList.add('hidden');
+
   function renderMenuState() {
     const m = S.get('menu');
     document.querySelectorAll('.mm-card').forEach(c => c.classList.toggle('active', c.dataset.mode === m.mode));
@@ -784,6 +830,7 @@ Game.UI = (function () {
     if (matchMode && playable.length && !playable.some(o => o.id === m.opponent)) S.set('menu', 'opponent', playable[0].id);
     renderBotPick($('mm-bot-pick'), botById(S.get('menu').opponent));
     renderBotPick($('mm-fp-pick'), botById(m.freeplayBot));
+    renderMapPick();
     const style = S.get('graphics').boostStyle;
     document.querySelectorAll('#mm-boost button').forEach(b => b.classList.toggle('active', b.dataset.boost === style));
   }
@@ -796,6 +843,12 @@ Game.UI = (function () {
         $(id).addEventListener('click', () => { openBots(kind); Game.Audio.uiSelect(); });
         $(id).addEventListener('mouseenter', () => Game.Audio.uiHover());
       });
+      $('mm-map-pick').addEventListener('click', () => { openMaps(); Game.Audio.uiSelect(); });
+      $('mm-map-pick').addEventListener('mouseenter', () => Game.Audio.uiHover());
+      $('maps-close').addEventListener('click', closeMaps);
+      $('maps-done').addEventListener('click', closeMaps);
+      $('maps-modal').addEventListener('click', e => { if (e.target === $('maps-modal')) closeMaps(); });
+      document.addEventListener('keydown', e => { if (isMapsOpen() && (e.code === 'Escape' || e.code === 'Enter')) { e.preventDefault(); closeMaps(); } });
       $('bots-close').addEventListener('click', () => closeBots(false));
       $('bots-cancel').addEventListener('click', () => closeBots(false));
       $('bots-select').addEventListener('click', () => closeBots(true));
