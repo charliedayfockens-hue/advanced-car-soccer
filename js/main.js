@@ -146,7 +146,7 @@
   let simTime = 0, playTime = 0, menuTime = 0;
   let goal = null, replay = null;
   let countdownT = 0, countdownStep = -1;
-  let goalLatch = false, debugFreeze = false;
+  let goalLatch = false, debugFreeze = false, debugWatch = 0;
   let flipResetFlag = false, wasSupersonic = false, speedAmount = 0;
 
   S.on('garage', () => { if (carViews.length) buildCarViews(); });
@@ -671,9 +671,11 @@
       const goalPos = new THREE.Vector3(0, 320, replay.team === 'blue' ? 5120 : -5120);
       chase.updateReplay(dt, carDraw[0].pos, ballDraw.pos, goalPos, replay.goalTime - replay.t, shake, replay.pos);
     } else {
-      chase.update(dt, carDraw[0].pos, carDraw[0].quat, me.speed, ballDraw.pos, paused ? null : I, shake,
-        { onGround: world.car.state.isOnGround, groundNormal: wheelGroundNormal(world.car),
-          velocity: toThreePos(world.car.body.linVel), supersonic: me.supersonic });
+      // debugWatch (GameDebug.watch) follows another car, e.g. a bot, for testing
+      const wi = Math.min(debugWatch, carDraw.length - 1), watched = world.cars[wi], wd = datas[wi] || me;
+      chase.update(dt, carDraw[wi].pos, carDraw[wi].quat, wd.speed, ballDraw.pos, paused ? null : I, shake,
+        { onGround: watched.state.isOnGround, groundNormal: wheelGroundNormal(watched),
+          velocity: toThreePos(watched.body.linVel), supersonic: wd.supersonic });
     }
     effects.setViewportHeight(window.innerHeight * renderer.getPixelRatio(), chase.camera.fov);
     Game.Audio.setListener(chase.camera);
@@ -728,6 +730,7 @@
     menu: goToMenu,
     forceGoal(team) { if (state === 'play') onGoal(team || 'blue'); },
     set freeze(v) { debugFreeze = !!v; },
+    set watch(i) { debugWatch = i | 0; },
     get replayInfo() { return replay && { t: replay.t, start: replay.clip.startTime, end: replay.clip.endTime, goalTime: replay.goalTime }; },
     // Drive the loop manually (browsers pause requestAnimationFrame in background tabs)
     advance(seconds, fps = 60) {
