@@ -484,7 +484,8 @@ window.Game = window.Game || {};
         this.phase = s.onGround ? 'jump' : 'fly';
       }
       if (events && events.some(e => e.type === 'flipReset' && e.car === s.index) && (this.phase === 'fly' || this.phase === 'turn')) {
-        if (stats) stats.resets = (stats.resets || 0) + 1;
+        // only resets up in the air count as the trick (a ball resting on upturned wheels near the floor doesn't)
+        if (stats && s.ball[2] > (this.p.minZ || 380)) stats.resets = (stats.resets || 0) + 1;
         this.phase = 'shoot';
         this.shootT = 0;
       }
@@ -884,22 +885,37 @@ window.Game = window.Game || {};
     }
   }
 
-  // Squishy save: get in front of a shot, jump and backflip upside down so the roof and wheels block the ball.
-  // p: lead (ticks driving at the ball first), speed, hold, wait, cancel (pitch held after the flip)
+  // Squishy save: get into the shot's path in front of our goal, then jump and backflip upside down just before the ball
+  // arrives so the roof and wheels block it. p: offset (uu in front of the line), jumpAt (s before arrival), hold, wait,
+  // cancel (pitch held after the flip)
   class SquishySave {
     constructor(p) { this.name = 'squishy save'; this.p = p; this.t = 0; }
     step(s, c, stats) {
       const p = this.p, t = ++this.t;
-      if (t === 1 && !s.onGround) return 'fail';
-      if (t <= p.lead) { driveTo(s, flat(s.ball), c, p.speed); return; }
-      const k = t - p.lead;
+      if (!this.plan) {
+        const lineY = -s.sign * (5000 - p.offset);
+        const path = Sim.predictBall(s.world, 2.5, 2);
+        const hit = path.find(b => (b.pos[1] - lineY) * -s.sign > 0);
+        if (!hit || hit.pos[2] > 420 || hit.pos[2] < 120) return 'fail';
+        this.plan = { x: clamp(hit.pos[0], -850, 850), y: lineY, T: hit.t, z: hit.pos[2] };
+      }
+      const left = this.plan.T - t * TICK;
+      if (stats && s.car.lastBallTouchTick === s.tick - 1) stats.saveTouch = true;
+      if (!this.jt) {
+        const spot = [this.plan.x, this.plan.y, 0];
+        const d = sub(spot, s.pos);
+        driveTo(s, spot, c, clamp(norm(flat(d)) / Math.max(left - p.jumpAt, 0.15), 0, 2300));
+        if (norm(flat(d)) < 150) { c.throttle = -clamp(s.fwdSpeed / 500, -1, 1); c.boost = false; }
+        if (left <= p.jumpAt && s.onGround) this.jt = 1;
+        return left < -1 ? 'done' : undefined;
+      }
+      const k = ++this.jt;
       if (k <= p.hold) c.jump = true;
-      else if (k <= p.hold + p.wait) c.pitch = 0;
+      else if (k <= p.hold + p.wait) { }
       else if (k === p.hold + p.wait + 1) { c.jump = true; c.pitch = 1; }
       else if (k <= p.hold + p.wait + 40) c.pitch = p.cancel;
       else recover(s, c);
-      if (stats && s.car.lastBallTouchTick === s.tick - 1) stats.saveTouch = true;
-      return k > p.hold + p.wait + 90 || (s.onGround && k > p.hold + p.wait + 20) ? 'done' : undefined;
+      return k > p.hold + p.wait + 100 || (s.onGround && k > p.hold + p.wait + 20) ? 'done' : undefined;
     }
   }
 
@@ -1078,9 +1094,20 @@ window.Game = window.Game || {};
 
   // A planning job: while the car runs `lead` for `delay` ticks, candidates are played out from the state the car
   // will be in when the lead finishes; the best one starts at exactly that tick
+  // Cars close enough to the car or the ball to matter in a sandbox run
+  function nearbyCars(world, index) {
+    const ball = uu(world.ball.pos), me = uu(world.cars[index].body.pos);
+    return world.cars.map((c, i) => i).filter(i => i !== index && !world.cars[i].isDemoed &&
+      Math.min(norm(sub(uu(world.cars[i].body.pos), ball)), norm(sub(uu(world.cars[i].body.pos), me))) < 2500);
+  }
+
   class PlanJob {
+    // lead: a mechanic the car drives while candidates are checked (they start where it ends, `delay` ticks later), or
+    // null for a shadow job: Nexto keeps driving, candidates are screened from a snapshot and the best are confirmed
+    // from the real state when the job finishes
     constructor(world, index, lead, delay, cands, horizon) {
-      this.lead = lead();
+      this.shadow = !lead;
+      this.lead = lead ? lead() : null;
       this.delay = delay;
       this.cands = cands;
       this.horizon = horizon;
@@ -1088,12 +1115,10 @@ window.Game = window.Game || {};
       this.age = 0;
       // Lead-in in the sandbox from the current state
       // Other cars near the action take part in the sandbox, holding their current inputs
-      const ball = uu(world.ball.pos), me = uu(world.cars[index].body.pos);
-      const others = world.cars.map((c, i) => i).filter(i => i !== index && !world.cars[i].isDemoed &&
-        Math.min(norm(sub(uu(world.cars[i].body.pos), ball)), norm(sub(uu(world.cars[i].body.pos), me))) < 2500);
+      const others = nearbyCars(world, index);
       leadBox.syncFrom(world, index, others);
-      const l = lead();
-      for (let i = 0; i < delay; i++) {
+      const l = lead ? lead() : null;
+      for (let i = 0; l && i < delay; i++) {
         const s = read(leadBox.world, 0, false), c = blank();
         if (l.step(s, c) === 'fail') { this.broken = true; break; }
         leadBox.step(c);
@@ -1133,6 +1158,28 @@ window.Game = window.Game || {};
       }
       return best;
     }
+    // Ranked candidates (best first) for confirming a shadow job
+    ranked(minScore, recent) {
+      const out = [];
+      for (const r of this.results) {
+        if (r.score <= minScore || (r.cand.style < 0 && r.score < 60)) continue;
+        const uses = recent ? recent.filter(n => n === r.cand.name).length : 0;
+        out.push([r.score + (uses === 0 ? 120 : -50 * uses), r]);
+      }
+      return out.sort((a, b) => b[0] - a[0]).map(x => x[1]);
+    }
+  }
+
+  // Replay one candidate from the real state right now (for shadow jobs); returns {st, score} or null
+  const confirmBox = new Sim.Sandbox();
+  function confirm(world, index, cand, horizon) {
+    const others = nearbyCars(world, index);
+    const snap = new Sim.Sandbox();
+    snap.syncFrom(world, index, others);
+    const r = new Rollout(confirmBox, snap.world, cand, cand.horizon || horizon, snap.others);
+    r.run(0);
+    const score = scoreOf(cand, r.stats);
+    return score > -100 && !(cand.style < 0 && score < 60) ? { st: r.stats, score } : null;
   }
 
   // ---------------- candidates per situation ----------------
@@ -1212,7 +1259,6 @@ window.Game = window.Game || {};
       } else if (kind === 'wall') out.push({ name: 'wall air dribble', make: () => new WallAirDribble(e.p), style: 170, horizon: 1000, needs: 'wall' });
       else if (kind === 'zen') out.push({ name: 'zen touch', make: () => new ZenTouch(Object.assign({ air: {} }, e.p)), style: 160, horizon: 1000, needs: 'zen' });
       else if (kind === 'doubleTap') out.push({ name: 'double tap', make: () => new DoubleTap(e.p), style: 200, horizon: 800, needs: 'secondTap' });
-      else if (kind === 'catch') out.push({ name: 'catch', make: () => new Catch(e.p), style: 300, horizon: 650, tail: 0, needs: 'caught' });
       else out.push({ name: 'flip reset', make: () => new FlipReset(e.reset), style: 250, horizon: 900, needs: 'resets' });
     }
     return out;
@@ -1372,7 +1418,8 @@ window.Game = window.Game || {};
       if (sit === 'defend') {
         const cands = [];
         for (let i = 0; i < 8; i++) {
-          const p = { lead: Math.floor(r() * 60), speed: 600 + r() * 1700, hold: 3 + Math.floor(r() * 20), wait: Math.floor(r() * 15), cancel: (r() - 0.5) * 2 };
+          const k = i / 8;
+          const p = { offset: clamp(200 + (r() - 0.5) * 200 * k, 0, 300), jumpAt: clamp(0.4 + (r() - 0.5) * 0.4 * k, 0.1, 0.9), hold: Math.max(1, Math.round(6 + (r() - 0.5) * 10 * k)), wait: Math.max(0, Math.round(4 + (r() - 0.5) * 8 * k)), cancel: clamp(0.23 + (r() - 0.5) * 1.2 * k, -1, 1) };
           cands.push({ name: 'squishy save', make: () => new SquishySave(p), style: 150, horizon: 420, tail: 240, needs: 'saveTouch' });
         }
         for (let i = 0; i < 4; i++) {
@@ -1380,21 +1427,21 @@ window.Game = window.Game || {};
           cands.push({ name: 'aerial', make: () => new AerialShot(p, 'goal'), style: 60, horizon: 450, tail: 240, needs: 'aerialTouch' });
         }
         cands.push(...shotCands(r).slice(0, 3));
-        return new PlanJob(this.world, this.index, () => new Approach(), 8, shuffle(cands, r), 450);
+        return Object.assign(new PlanJob(this.world, this.index, null, 12, shuffle(cands, r), 450), { sit: 'defend' });
       }
       if (sit === 'roof') {
         const cands = flickCands(r);
         if (s.boost > 25) cands.push(...airDribbleCands(r).slice(0, 4));
-        if (s.boost > 35) cands.push(...libraryCands(r, 'popReset', 8), ...libraryCands(r, 'airReset', 7), ...libraryCands(r, 'signature', 3));
+        if (s.boost > 35) cands.push(...libraryCands(r, 'popReset', 10), ...libraryCands(r, 'airReset', 3), ...libraryCands(r, 'signature', 1));
         if (nearWall && s.boost > 30) cands.push(...wallCands(r, 3));
-        return new PlanJob(this.world, this.index, () => new Dribble({ speed: 1100 }), 60, shuffle(cands, r), 1100);
+        return Object.assign(new PlanJob(this.world, this.index, () => new Dribble({ speed: 1100 }), 60, shuffle(cands, r), 1100), { sit: 'roof' });
       }
       if (sit === 'ground') {
         // catches (the start of every dribble freestyle) are checked first, shots only as a fallback
         const cands = shuffle(catchCands(r), r);
         if (nearWall) cands.push(...pinchCands(r), ...(s.boost > 30 ? wallCands(r, 3) : []));
         cands.push(...shotCands(r));
-        return new PlanJob(this.world, this.index, () => new Approach(), 16, cands, 700);
+        return Object.assign(new PlanJob(this.world, this.index, null, 40, cands, 700), { sit: 'ground' });
       }
       const cands = catchCands(r).slice(0, 3);
       if (s.boost > 25) {
@@ -1426,7 +1473,7 @@ window.Game = window.Game || {};
           cands.push({ name: 'ceiling shot', make: () => new CeilingShot({ side: Math.sign(s.ball[0] || 1), slack: 250, gap: 60 }), style: 250, horizon: 1100, needs: 'ceilingShot' });
         }
       }
-      return new PlanJob(this.world, this.index, () => new Approach(), 16, shuffle(cands, r), 900);
+      return Object.assign(new PlanJob(this.world, this.index, null, 40, shuffle(cands, r), 900), { sit: 'air' });
     }
 
     // A shot heading into our net that Trilo is best placed to stop: {t, pos} or null (checked every few ticks)
@@ -1439,7 +1486,7 @@ window.Game = window.Game || {};
       if (!hit) return null;
       // Squishy saves are for high shots with Trilo already back on its line; Nexto handles every other save
       const mine = norm(sub(hit.pos, s.pos));
-      if (hit.pos[2] < 250 || s.pos[1] * s.sign > -4300 || mine > 1300 || hit.t > 1.6) return null;
+      if (hit.pos[2] < 150 || hit.pos[2] > 420 || s.pos[1] * s.sign > -4300 || mine > 1300 || hit.t > 1.6) return null;
       if (s.mates.some(m => norm(sub(hit.pos, m.pos)) < mine - 300)) return null;
       return (this.lastThreat = hit);
     }
@@ -1465,6 +1512,35 @@ window.Game = window.Game || {};
       const w = this.world;
       if (this.cooldown > 0) this.cooldown--;
 
+      // Shadow planning: Nexto keeps playing while candidates are screened; the best two are re-checked from the real
+      // state before one starts
+      if (this.job && this.job.shadow) {
+        const job = this.job;
+        this.stats.planTicks++;
+        job.work(w);
+        job.age++;
+        if (job.finished || job.age >= job.delay) {
+          this.job = null;
+          this.lastJob = job.results.map(x => [x.cand.name, Math.round(x.score), x.st.failed || '', x.st.resets || 0, x.st.goal || '']);
+          let started = false;
+          if (job.sit === 'defend' ? this.threat(s) : this.situation(s) === job.sit) {
+            for (const r of job.ranked(-100, this.recent).slice(0, 2)) {
+              const ok = confirm(w, this.index, r.cand, job.horizon);
+              if (!ok) continue;
+              this.start(r.cand.make(), r.cand.chain && r.cand.chain.slice(), ok.st.path);
+              this.carPath = ok.st.carPath; this.carWarned = false;
+              if (r.cand.name !== 'catch') { this.recent.push(r.cand.name); if (this.recent.length > 4) this.recent.shift(); }
+              this.note('picked ' + r.cand.name + ' (' + Math.round(ok.score) + ', ' + job.results.length + '/' + job.cands.length + ' checked, confirmed)');
+              started = true;
+              break;
+            }
+          }
+          if (!started) { this.cooldown = this.pressure(s) < 2.5 ? 60 : 20; this.stats.empty++; return this.movementTech(s, base); }
+          return this.think(s, base);
+        }
+        return base;
+      }
+
       // Planning: drive the lead-in while candidates play out in the sandbox
       if (this.job) {
         const job = this.job, c = blank();
@@ -1486,7 +1562,7 @@ window.Game = window.Game || {};
             this.start(new Dribble({ speed: 1100, ticks: 20 }));
           } else {
             // nothing works from here: let Nexto play for a bit before looking again
-            this.cooldown = s.opps.length ? 150 : 40;
+            this.cooldown = this.pressure(s) < 2.5 ? 150 : 40;
             this.stats.empty++;
           }
         }
@@ -1494,7 +1570,7 @@ window.Game = window.Game || {};
       }
 
       // Pressure: an opponent closing on the ball ends slow ground setups (lining up, catches, dribbles) and Nexto plays it
-      const slow = (this.job && this.job.lead.name !== 'dribble') || (this.mech && ['catch', 'approach', 'dribble', 'pop'].includes(this.mech.name));
+      const slow = this.mech && ['catch', 'approach', 'dribble', 'pop'].includes(this.mech.name);
       if (slow && this.pressure(s) < 0.75 && !(s.ballOnRoof && this.mech && this.mech.name === 'dribble' && this.pressure(s) > 0.45)) {
         this.job = null; this.mech = null; this.path = null; this.cooldown = 90;
         this.note('pressured');
@@ -1513,12 +1589,13 @@ window.Game = window.Game || {};
         const c = blank();
         const st = this.mech.step(s, c, null, w.events);
         this.planT++;
-        if (this.carPath && (this.planT - 1) % 4 === 0) {
-          const cw = this.carPath[(this.planT - 1) / 4];
+        // path[i] is the state after 4i+1 steps; this tick's state is after planT-1 steps
+        if (this.carPath && this.planT >= 2 && (this.planT - 2) % 4 === 0) {
+          const cw = this.carPath[(this.planT - 2) / 4];
           if (cw && norm(sub(s.pos, cw)) > 40 && !this.carWarned) { this.carWarned = true; this.note('car off plan at ' + this.planT + ': ' + Math.round(norm(sub(s.pos, cw)))); }
         }
-        if (this.path && (this.planT - 1) % 4 === 0) {
-          const want = this.path[(this.planT - 1) / 4];
+        if (this.path && this.planT >= 2 && (this.planT - 2) % 4 === 0) {
+          const want = this.path[(this.planT - 2) / 4];
           if (want && norm(sub(s.ball, want)) > 60) {
             this.note(this.mech.name + ': ball moved off plan, re-planning');
             this.mech = null; this.path = null; this.cooldown = 0;
