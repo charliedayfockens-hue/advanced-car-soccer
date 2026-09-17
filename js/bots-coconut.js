@@ -151,7 +151,7 @@ Game.BotsCoconut = (function () {
 
   const list = Game.Bots.OPPONENTS;
   list.splice(list.findIndex(o => o.id === 'nexto') + 1, 0,
-    { id: 'coconut', name: 'Indonesian Coconut', desc: 'Supersonic Legend-level challenger, 1v1 only. An RLGym v2 reinforcement learning bot by SentientPlatypus, trained for 17.9 billion steps. Air dribbles, flip resets, flicks and wall play, and it beat Element 47-3 in testing.',
+    { id: 'coconut', name: 'Indonesian Coconut', desc: '1v1 only. An RLGym v2 reinforcement learning bot by SentientPlatypus, trained for 17.9 billion steps. Air dribbles, flip resets, flicks and wall play, and it beat Element 47-3 in testing.',
       modes: ['1v1'], make: (w, i) => new CoconutBot(w, i), load });
 
   return { CoconutBot, load, Runner };

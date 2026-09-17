@@ -28,7 +28,12 @@ Game.Audio = (function () {
   };
   // Seamless loops: the files carry 0.25 s of wrap-around padding each side so encoder delay can't click
   const LOOPS = { boostLoop: { start: 0.25, length: 3.6 }, engineLoop: { start: 0.25, length: 3.6 } };
-  const GOAL_SOUND = { classic: 'goalClassic', partyTime: 'goalClassic', fireworks: 'goalFireworks', hellfire: 'goalHellfire', dragons: 'goalDragons', voxel: 'goalVoxel' };
+  const GOAL_SOUND = {
+    classic: 'goalClassic', partyTime: 'goalClassic', fireworks: 'goalFireworks', hellfire: 'goalHellfire', dragons: 'goalDragons', voxel: 'goalVoxel',
+    singularity: 'goalDragons', meteorStorm: 'goalHellfire', neuroAgitator: 'goalVoxel', bigSplash: 'goalClassic', atomizer: 'goalDragons',
+    shattered: 'goalVoxel', goldRush: 'goalFireworks', toon: 'goalClassic', forceRazor: 'goalVoxel', ballistic: 'goalHellfire', polyPop: 'goalFireworks',
+    subZero: 'goalVoxel', solarFlare: 'goalHellfire', distortion: 'goalDragons', popcorn: 'goalFireworks', mushroomCloud: 'goalHellfire'
+  };
 
   let ctx = null, master = null, volume = 0.6, requested = false;
   const buffers = {};

@@ -102,17 +102,24 @@
   }
 
   // ---------- settings ----------
+  // Rebuilds the arena when the theme or map changes
+  let builtMap = null;
+  const menuMap = () => { const m = S.get('menu').map || 'random'; return m === 'random' ? 'dfh' : m; };
+  function buildStadium(theme, mapId) {
+    if (stadium && theme === builtTheme && mapId === builtMap) return;
+    if (stadium) stadium.dispose();
+    stadium = Game.Stadium.build(scene, { theme, map: mapId, boostPads: world.boostPads, renderer });
+    stadium.setScore(score.blue, score.orange);
+    stadium.setShowStadium(S.get('graphics').showStadium);
+    builtTheme = theme;
+    builtMap = mapId;
+    carViews.forEach(v => { v.setTheme(theme); applyEnv(v.group); });
+    applyEnv(ballView.mesh);
+    Game.View.onModels(() => applyEnv(ballView.mesh));
+    bloomBase = theme === 'arcade' ? 0.3 : 0.5;
+  }
   S.on('graphics', g => {
-    if (g.theme !== builtTheme) {
-      if (stadium) stadium.dispose();
-      stadium = Game.Stadium.build(scene, { theme: g.theme, boostPads: world.boostPads, renderer });
-      stadium.setScore(score.blue, score.orange);
-      builtTheme = g.theme;
-      carViews.forEach(v => { v.setTheme(g.theme); applyEnv(v.group); });
-      applyEnv(ballView.mesh);
-      Game.View.onModels(() => applyEnv(ballView.mesh));
-      bloomBase = g.theme === 'arcade' ? 0.3 : 0.5;
-    }
+    buildStadium(g.theme, builtMap || menuMap());
     stadium.setShowStadium(g.showStadium);
     if (carViews[0]) carViews[0].setBoostStyle(g.boostStyle);
   });
@@ -179,6 +186,8 @@
       teams = botTeam ? ['blue', botTeam] : ['blue'];
     }
     world.setTeams(teams);
+    session.map = Game.Maps.resolve(S.get('menu').map || 'random');
+    buildStadium(S.get('graphics').theme, session.map);
     const carIds = Game.View.CARS.map(c => c.id);
     session.carIds = teams.map((t, i) => (i === 0 ? S.get('garage').car : carIds[Math.floor(Math.random() * carIds.length)]));
     world.setBoostMode(isMatch ? 'standard' : S.get('training').boost);
@@ -232,8 +241,10 @@
     ballView.setVisible(true);
     chase.reset();
     Game.Input.exitPointerLock();
+    buildStadium(S.get('graphics').theme, menuMap());
     Game.UI.showMainMenu({
-      opponents: Game.Bots.OPPONENTS, onStart: startSession, cars: Game.View.CARS,
+      opponents: Game.Bots.OPPONENTS, onStart: startSession, cars: Game.View.CARS, maps: Game.Maps.MAPS,
+      onMapPreview: id => buildStadium(S.get('graphics').theme, id === 'random' ? 'dfh' : id),
       renderCarThumbnail: id => Game.View.renderThumbnail(renderer, id, 640, 360, PAINT.freeplay)
     });
   }

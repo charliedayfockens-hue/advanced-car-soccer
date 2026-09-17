@@ -38,7 +38,7 @@ Game.Settings = (function () {
     camera: { fov: 110, distance: 270, height: 100, angle: -3, stiffness: 0.35, swivelSpeed: 4, transitionSpeed: 1, cameraShake: false, invertSwivel: true },
     controls: { device: 'auto', deadzone: 0.12, steerAxis: 0, invertSteer: false, pitchAxis: 1, invertPitch: false, triggerThreshold: 0.15, bindings: DEFAULT_BINDINGS },
     graphics: { theme: 'realistic', limitFps: false, maxFps: 120, showStadium: true, boostStyle: 'alpha' },
-    menu: { mode: 'freeplay', opponent: 'element', freeplayBot: 'none', mirrorAxis: 'midfield' },
+    menu: { mode: 'freeplay', opponent: 'element', freeplayBot: 'none', mirrorAxis: 'midfield', map: 'random' },
     garage: { car: 'surbabu', explosion: 'classic', explosionPaints: {} },
     profile: { name: '' },
     audio: { volume: 60 },

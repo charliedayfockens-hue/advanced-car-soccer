@@ -419,7 +419,7 @@ Game.Bots = (function () {
   }
 
   const OPPONENTS = [
-    { id: 'element', name: 'Element', desc: 'Diamond-level challenger. A neural network by Rangler, trained with RLGym reinforcement learning (RLBotPack). Speed-flips kickoffs, shoots hard, challenges quickly and rotates back when beaten. A real test of your fundamentals.', modes: ['1v1'], make: (w, i) => new ElementBot(w, i), load: loadElement },
+    { id: 'element', name: 'Element', desc: 'A neural network by Rangler, trained with RLGym reinforcement learning (RLBotPack). Speed-flips kickoffs, shoots hard, challenges quickly and rotates back when beaten. A real test of your fundamentals.', modes: ['1v1'], make: (w, i) => new ElementBot(w, i), load: loadElement },
     { id: 'bowie', name: 'Bowie Knife 99', desc: 'Bump and demo meme bot with unlimited boost that can\'t be demolished. It barely cares about the ball: it hunts you down at supersonic and tries to demolish you every chance it gets.', modes: ['1v1', '2v2', '3v3'], make: (w, i) => new BowieKnifeBot(w, i), load: () => Promise.resolve() },
     { id: 'rookie', name: 'Rookie', desc: 'Simple ball chaser. Good for warming up.', modes: ['1v1', '2v2', '3v3'], make: (w, i) => new RookieBot(w, i), load: () => Promise.resolve() },
     { id: 'mirror', name: 'Mirror Bot', desc: 'Free play only. Copies every move you make in mirror image, from the other half of the field or the other side of it. It can\'t be demolished.', modes: ['freeplay'],

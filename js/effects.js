@@ -743,7 +743,13 @@ Game.Effects = (function () {
       this.voxels.update(dt);
       this.updateTrails(dt);
       this.light.intensity *= Math.exp(-4 * dt);
-      if (dt > 0) this.actors = this.actors.filter(a => { a.t += dt; return a.update(a, dt) !== false; });
+      if (dt > 0) {
+        // Actors may start new actors while they run; those land in the fresh list and are kept
+        const running = this.actors;
+        this.actors = [];
+        const kept = running.filter(a => { a.t += dt; return a.update(a, dt) !== false; });
+        this.actors = kept.concat(this.actors);
+      }
       for (let i = this.rings.length - 1; i >= 0; i--) {
         const r = this.rings[i];
         r.t += dt;

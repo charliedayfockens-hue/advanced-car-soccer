@@ -16,6 +16,7 @@ Game.BotControl = (function () {
     const F = forward.normalized(), Uw = up.normalized();
     let e = f.cross(F).add(u.cross(Uw).mul(0.7));
     if (f.dot(F) < -0.95) e = e.add(u); // nose pointing straight away: start with a yaw
+    if (u.dot(Uw) < -0.5) e = e.add(f.mul(1.2)); // roof pointing the wrong way: the cross product vanishes near 180, so roll over
     const k = gain || 5;
     const dF = k * e.dot(f) - av.dot(f), dR = k * e.dot(r) - av.dot(r), dU = k * e.dot(u) - av.dot(u);
     controls.roll = clamp11(-dF);
