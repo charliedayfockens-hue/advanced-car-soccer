@@ -22,7 +22,8 @@ Opti - inspired by Kaiyotech's Opti (github.com/Kaiyotech/Opti, no license). Opt
 Wasp - written for this game: Bumblebee's hivemind team roles (from the Botimus Prime & Bumblebee port above) with
   Nexto's network driving the car sent for the ball.
 
-Trilo - written for this game: Nexto's network plus original freestyle mechanics (dribbles, flicks, air dribbles,
-  flip resets, double taps, ceiling shots, wave dashes, half flips, wall dashes).
+Trilo - written for this game: Nexto's network plus a freestyle planner that plays each mechanic out in a private copy of
+  the game's RocketSim physics before using it. Mechanic gains and the move library (js/trilo-moves.js) were found by
+  searching that sandbox.
 
 Rookie, Bowie Knife 99 and Mirror Bot - written for this game (Mirror Bot after Darxeal's mirror-bot idea).

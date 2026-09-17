@@ -999,37 +999,63 @@ window.Game = window.Game || {};
 
   const rollBox = new Sim.Sandbox(), leadBox = new Sim.Sandbox();
   const budget = { tick: -1, ms: 0 };
-  const BUDGET_MS = 5;
+  const BUDGET_MS = 6;
 
   // Play a candidate forward from `box`'s state; returns stats and a score
-  function rollout(startWorld, cand, maxTicks, startBox) {
-    startBox = startBox || { others: [] };
-    rollBox.syncFrom(startWorld, 0, startWorld.cars.map((c, i) => i).slice(1));
-    rollBox.others = startBox.others;
-    const w = rollBox.world, stats = { ticks: 0, touches: 0, path: [] };
-    let mech = cand.make(), queue = (cand.chain || []).slice(), status, t = 0, ended = -1, goal = null;
-    const team = w.cars[0].team;
-    for (; t < maxTicks; t++) {
-      const s = read(w, 0, false), c = blank();
-      if (mech) {
-        status = mech.step(s, c, stats, w.events);
-        if (status === 'fail') { stats.failed = mech.name; mech = null; ended = t; break; }
-        if (status === 'done') { mech = queue.length ? queue.shift()() : null; if (!mech) ended = t; }
-      } else recover(s, c);
-      rollBox.step(c);
-      if (t % 4 === 0) { stats.path.push(uu(w.ball.pos)); (stats.carPath = stats.carPath || []).push(uu(w.cars[0].body.pos)); }
-      if (w.events.some(e => e.type === 'ballHit' && e.car === 0)) stats.touches++;
-      const scored = w.scoredGoal();
-      if (scored) { goal = scored === team ? 'for' : 'against'; break; }
-      if (ended >= 0 && t - ended > (cand.tail === undefined ? 150 : cand.tail)) break;
+  // A candidate played forward in a sandbox. It runs in slices (run(deadline)) so a long plan never stalls a frame.
+  class Rollout {
+    constructor(box, startWorld, cand, maxTicks, others) {
+      box.syncFrom(startWorld, 0, startWorld.cars.map((c, i) => i).slice(1));
+      box.others = others || [];
+      this.box = box;
+      this.cand = cand;
+      this.maxTicks = maxTicks;
+      this.stats = { ticks: 0, touches: 0, path: [], carPath: [] };
+      this.mech = cand.make();
+      this.queue = (cand.chain || []).slice();
+      this.t = 0;
+      this.ended = -1;
+      this.goal = null;
+      this.team = box.world.cars[0].team;
+      this.done = false;
     }
-    stats.ticks = ended >= 0 ? ended : t;
-    stats.goal = goal;
-    const ball = uu(w.ball.pos), bv = uu(w.ball.linVel), sign = team === 'blue' ? 1 : -1;
-    stats.ballEnd = ball;
-    stats.towardGoal = bv[1] * sign;
-    stats.complete = !stats.failed && ended >= 0;
-    return stats;
+    run(deadline) {
+      const w = this.box.world, stats = this.stats, tail = this.cand.tail === undefined ? 150 : this.cand.tail;
+      while (!this.done) {
+        if (this.t >= this.maxTicks) { this.finish(); break; }
+        const s = read(w, 0, false), c = blank();
+        if (this.mech) {
+          const status = this.mech.step(s, c, stats, w.events);
+          if (status === 'fail') { stats.failed = this.mech.name; this.mech = null; this.ended = this.t; this.finish(); break; }
+          if (status === 'done') { this.mech = this.queue.length ? this.queue.shift()() : null; if (!this.mech) this.ended = this.t; }
+        } else recover(s, c);
+        this.box.step(c);
+        if (this.t % 4 === 0) { stats.path.push(uu(w.ball.pos)); stats.carPath.push(uu(w.cars[0].body.pos)); }
+        if (w.events.some(e => e.type === 'ballHit' && e.car === 0)) stats.touches++;
+        const scored = w.scoredGoal();
+        if (scored) { this.goal = scored === this.team ? 'for' : 'against'; this.finish(); break; }
+        if (this.ended >= 0 && this.t - this.ended > tail) { this.finish(); break; }
+        this.t++;
+        if (deadline && this.t % 16 === 0 && performance.now() > deadline) break;
+      }
+      return this.done;
+    }
+    finish() {
+      const w = this.box.world, stats = this.stats;
+      stats.ticks = this.ended >= 0 ? this.ended : this.t;
+      stats.goal = this.goal;
+      stats.ballEnd = uu(w.ball.pos);
+      stats.towardGoal = uu(w.ball.linVel)[1] * (this.team === 'blue' ? 1 : -1);
+      stats.complete = !stats.failed && this.ended >= 0;
+      this.done = true;
+    }
+  }
+
+  // Whole rollout in one go (used by the dev harness)
+  function rollout(startWorld, cand, maxTicks, startBox) {
+    const r = new Rollout(rollBox, startWorld, cand, maxTicks, startBox && startBox.others);
+    r.run(0);
+    return r.stats;
   }
 
   function scoreOf(cand, st) {
@@ -1078,14 +1104,20 @@ window.Game = window.Game || {};
       this.predictedBall = uu(this.start.world.ball.pos);
       this.predictedCar = uu(this.start.world.cars[0].body.pos);
     }
+    // Play candidates out within this tick's share of the planning budget (shared by every Trilo in the game)
     work(world) {
       if (budget.tick !== world.tickCount) { budget.tick = world.tickCount; budget.ms = 0; }
+      if (!this.box) this.box = new Sim.Sandbox();
       while (this.results.length < this.cands.length && budget.ms < BUDGET_MS) {
         const t0 = performance.now();
-        const cand = this.cands[this.results.length];
-        const st = rollout(this.start.world, cand, cand.horizon || this.horizon, this.start);
-        st.sign = world.cars[0] ? 1 : 1;
-        this.results.push({ cand, st, score: scoreOf(cand, st) });
+        if (!this.cur) {
+          const cand = this.cands[this.results.length];
+          this.cur = new Rollout(this.box, this.start.world, cand, cand.horizon || this.horizon, this.start.others);
+        }
+        if (this.cur.run(t0 + BUDGET_MS - budget.ms)) {
+          this.results.push({ cand: this.cur.cand, st: this.cur.stats, score: scoreOf(this.cur.cand, this.cur.stats) });
+          this.cur = null;
+        }
         budget.ms += performance.now() - t0;
       }
     }
@@ -1263,6 +1295,7 @@ window.Game = window.Game || {};
       this.nexto = new Game.BotsNecto.NextoBot(world, carIndex);
       this.log = [];
       this.recent = [];
+      this.stats = { jobs: 0, empty: 0, picked: 0, pressured: 0, planTicks: 0 };
       this.seed = 1234 + carIndex * 7777;
       this.reset();
     }
@@ -1280,6 +1313,7 @@ window.Game = window.Game || {};
       this.minCarry = 90;
       this.lastJump = false;
       this.airTicks = 0;
+      this.techCd = 0;
     }
 
     note(text) {
@@ -1309,7 +1343,19 @@ window.Game = window.Game || {};
       const mine = eta(s.pos, s.vel);
       const theirs = Math.min(Infinity, ...s.opps.map(o => eta(o.pos, o.vel)));
       const mates = Math.min(Infinity, ...s.mates.map(o => eta(o.pos, o.vel)));
-      return mine < theirs - 0.25 && mine <= mates + 0.05;
+      // no freestyles in our own third while opponents are around
+      if (s.ball[1] * s.sign < -2500) return false;
+      return mine < theirs - 0.6 && mine <= mates + 0.05;
+    }
+
+    // Seconds until the most threatening opponent could reach the ball (Infinity alone)
+    pressure(s) {
+      let best = Infinity;
+      for (const o of s.opps) {
+        const d = sub(s.ball, o.pos), dist = norm(d), closing = dot(o.vel, normalize(d));
+        best = Math.min(best, dist / Math.max(500, closing + 300));
+      }
+      return best;
     }
 
     situation(s) {
@@ -1327,11 +1373,11 @@ window.Game = window.Game || {};
         const cands = [];
         for (let i = 0; i < 8; i++) {
           const p = { lead: Math.floor(r() * 60), speed: 600 + r() * 1700, hold: 3 + Math.floor(r() * 20), wait: Math.floor(r() * 15), cancel: (r() - 0.5) * 2 };
-          cands.push({ name: 'squishy save', make: () => new SquishySave(p), style: 150, horizon: 420, tail: 150 });
+          cands.push({ name: 'squishy save', make: () => new SquishySave(p), style: 150, horizon: 420, tail: 240, needs: 'saveTouch' });
         }
         for (let i = 0; i < 4; i++) {
           const p = { gap: 40 + r() * 60, turn: 0.15, later: r() * 0.15, dodge: r() < 0.5, dodgeDist: 200 + r() * 60 };
-          cands.push({ name: 'aerial', make: () => new AerialShot(p, 'goal'), style: 60, horizon: 450 });
+          cands.push({ name: 'aerial', make: () => new AerialShot(p, 'goal'), style: 60, horizon: 450, tail: 240, needs: 'aerialTouch' });
         }
         cands.push(...shotCands(r).slice(0, 3));
         return new PlanJob(this.world, this.index, () => new Approach(), 8, shuffle(cands, r), 450);
@@ -1348,7 +1394,7 @@ window.Game = window.Game || {};
         const cands = shuffle(catchCands(r), r);
         if (nearWall) cands.push(...pinchCands(r), ...(s.boost > 30 ? wallCands(r, 3) : []));
         cands.push(...shotCands(r));
-        return new PlanJob(this.world, this.index, () => new Approach(), 30, cands, 700);
+        return new PlanJob(this.world, this.index, () => new Approach(), 16, cands, 700);
       }
       const cands = catchCands(r).slice(0, 3);
       if (s.boost > 25) {
@@ -1380,7 +1426,7 @@ window.Game = window.Game || {};
           cands.push({ name: 'ceiling shot', make: () => new CeilingShot({ side: Math.sign(s.ball[0] || 1), slack: 250, gap: 60 }), style: 250, horizon: 1100, needs: 'ceilingShot' });
         }
       }
-      return new PlanJob(this.world, this.index, () => new Approach(), 24, shuffle(cands, r), 900);
+      return new PlanJob(this.world, this.index, () => new Approach(), 16, shuffle(cands, r), 900);
     }
 
     // A shot heading into our net that Trilo is best placed to stop: {t, pos} or null (checked every few ticks)
@@ -1391,8 +1437,10 @@ window.Game = window.Game || {};
       const path = Sim.predictBall(this.world, 2.5, 4);
       const hit = path.find(b => b.pos[1] * s.sign < -5000 && Math.abs(b.pos[0]) < 950 && b.pos[2] < 700);
       if (!hit) return null;
+      // Squishy saves are for high shots with Trilo already back on its line; Nexto handles every other save
       const mine = norm(sub(hit.pos, s.pos));
-      if (s.mates.some(m => norm(sub(hit.pos, m.pos)) < mine - 300) || mine > 2600) return null;
+      if (hit.pos[2] < 250 || s.pos[1] * s.sign > -4300 || mine > 1300 || hit.t > 1.6) return null;
+      if (s.mates.some(m => norm(sub(hit.pos, m.pos)) < mine - 300)) return null;
       return (this.lastThreat = hit);
     }
 
@@ -1420,6 +1468,7 @@ window.Game = window.Game || {};
       // Planning: drive the lead-in while candidates play out in the sandbox
       if (this.job) {
         const job = this.job, c = blank();
+        this.stats.planTicks++;
         job.work(w);
         const st = job.lead.step(s, c);
         job.age++;
@@ -1433,15 +1482,28 @@ window.Game = window.Game || {};
             this.carPath = best.st.carPath; this.carWarned = false;
             if (best.cand.name !== 'catch') { this.recent.push(best.cand.name); if (this.recent.length > 4) this.recent.shift(); }
             this.note('picked ' + best.cand.name + ' (' + Math.round(best.score) + ', ' + job.results.length + '/' + job.cands.length + ' checked)');
-          } else if (job.lead.name === 'dribble') {
+          } else if (job.lead.name === 'dribble' && s.ballOnRoof) {
             this.start(new Dribble({ speed: 1100, ticks: 20 }));
+          } else {
+            // nothing works from here: let Nexto play for a bit before looking again
+            this.cooldown = s.opps.length ? 150 : 40;
+            this.stats.empty++;
           }
         }
         return c;
       }
 
+      // Pressure: an opponent closing on the ball ends slow ground setups (lining up, catches, dribbles) and Nexto plays it
+      const slow = (this.job && this.job.lead.name !== 'dribble') || (this.mech && ['catch', 'approach', 'dribble', 'pop'].includes(this.mech.name));
+      if (slow && this.pressure(s) < 0.75 && !(s.ballOnRoof && this.mech && this.mech.name === 'dribble' && this.pressure(s) > 0.45)) {
+        this.job = null; this.mech = null; this.path = null; this.cooldown = 90;
+        this.note('pressured');
+        this.stats.pressured++;
+        return this.movementTech(s, base);
+      }
+
       // 50/50: an opponent is about to hit the ball we're right next to
-      if (s.dist < 300 && s.onGround && s.ball[2] < 250 && (!this.mech || ['dribble', 'catch'].includes(this.mech.name))) {
+      if (s.dist < 300 && s.onGround && s.ball[2] < 250 && this.mech && ['dribble', 'catch'].includes(this.mech.name)) {
         const o = s.opps.find(o => norm(sub(o.pos, s.ball)) < 450 && dot(o.vel, normalize(sub(s.ball, o.pos))) > 700);
         if (o) { this.job = null; this.start(new FiftyFifty()); }
       }
@@ -1487,6 +1549,7 @@ window.Game = window.Game || {};
         if (sit) {
           if (sit !== 'roof') this.minCarry = 20 + Math.floor(this.random()() * 80);
           this.job = this.makeJob(s, sit);
+          this.stats.jobs++;
           return this.think(s, base);
         }
       }
@@ -1498,30 +1561,36 @@ window.Game = window.Game || {};
       return norm(sub(s.ball, job.predictedBall)) < 40 && norm(sub(s.pos, job.predictedCar)) < 40;
     }
 
+    // Movement tech on top of Nexto, only where it can't get in the way of Nexto's play
     movementTech(s, base) {
       const c = Object.assign({}, base);
-      if (s.onGround && s.u[2] > 0.9 && s.fwdSpeed < -500 && base.throttle < 0 && dot(normalize(flat(s.toBall)), s.f) < -0.7 && s.dist > 900) {
+      this.reverseT = s.onGround && s.fwdSpeed < -300 && base.throttle < 0 ? (this.reverseT || 0) + 1 : 0;
+      if (this.techCd > 0) { this.techCd--; return c; }
+      if (this.reverseT > 45 && s.u[2] > 0.9 && dot(normalize(flat(s.toBall)), s.f) < -0.8 && s.dist > 1500) {
         this.start(new HalfFlip(s));
+        this.techCd = 120;
         return this.think(s, base);
       }
-      if (s.onGround && s.u[2] > 0.9 && s.fwdSpeed > 300 && s.fwdSpeed < 1300 && base.throttle > 0.5 && s.boost < 25 && s.dist > 2500 && dot(normalize(flat(s.toBall)), s.f) > 0.97 && this.cooldown <= 0) {
+      if (s.onGround && s.u[2] > 0.9 && s.fwdSpeed > 300 && s.fwdSpeed < 1300 && base.throttle > 0.5 && s.boost < 25 && s.dist > 3000 &&
+          dot(normalize(flat(s.toBall)), s.f) > 0.97) {
         this.start(new SpeedFlip(s));
-        this.cooldown = 240;
+        this.techCd = 240;
         return this.think(s, base);
       }
-      // Wave dash: dodge just before the wheels touch down
-      if (!s.onGround && this.airTicks > 40 && s.vel[2] < -250 && s.pos[2] > 20 && s.pos[2] < 55 && s.u[2] > 0.92 && s.canFlip && !this.lastJump) {
+      // Wave dash: dodge just before the wheels touch down after a long fall, away from the play
+      if (!s.onGround && this.airTicks > 60 && s.vel[2] < -300 && s.pos[2] > 20 && s.pos[2] < 55 && s.u[2] > 0.92 && s.canFlip && !this.lastJump && s.dist > 1200) {
         const dir = normalize(flat(s.toBall));
-        if (dot(dir, s.f) > 0.3) {
+        if (dot(dir, s.f) > 0.5) {
           const m = new WaveDash(s);
           // Pogo: the same dodge into the floor bounces the car back up at a ball that's above it
           if (s.ball[2] > 300 && norm(flat(s.toBall)) < 700) m.name = 'pogo';
           this.start(m);
+          this.techCd = 60;
           return this.think(s, base);
         }
       }
-      if (s.onGround && s.u[2] < 0.3 && Math.abs(s.u[2]) < 0.3 && s.pos[2] > 300 && base.throttle > 0 && s.speed < 1500 && this.cooldown <= 0) {
-        this.cooldown = 90;
+      if (s.onGround && Math.abs(s.u[2]) < 0.3 && s.pos[2] > 300 && base.throttle > 0 && s.speed < 1000 && s.dist > 2500) {
+        this.techCd = 180;
         this.start(new WallDash());
         return this.think(s, base);
       }
@@ -1547,7 +1616,7 @@ window.Game = window.Game || {};
 
   const list = Game.Bots.OPPONENTS;
   list.splice(list.findIndex(o => o.id === 'nexto') + 1, 0,
-    { id: 'trilo', name: 'Trilo', desc: "A freestyler with Nexto's speed and aggression. Every time it gets the ball it goes for a freestyle, testing each idea in its own copy of the physics first: catches into dribbles, front, 45 and musty flicks, air dribbles, flip resets, double taps and ceiling shots, plus wave dashes, half flips and speed flips. Also plays in free play, so you can watch it show off.",
+    { id: 'trilo', name: 'Trilo', desc: "A freestyler built on Nexto. Every time it gets the ball it goes for a setup, and it plays each idea out in its own copy of the physics first, so what it tries actually works: catches into roof dribbles, front, 45 and musty flicks, pops and air dribbles into flip resets, double taps, zen touches, pinches, psychos, ceiling shots and squishy saves, with half flips, wave dashes and pogos in between. Also plays in free play, so you can watch it show off.",
       modes: ['freeplay', '1v1', '2v2', '3v3'], make: (w, i) => new TriloBot(w, i), load: () => Game.BotsNecto.loadModel('nexto') });
 
   Game.BotsTrilo = {
